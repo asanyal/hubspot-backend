@@ -45,7 +45,7 @@ class HubspotService:
             self._deals_cache_ttl = 3600  # 1 hour in seconds
             
             self._initialized = True
-            print(Fore.GREEN + "[SINGLETON] Initialized new HubspotService instance" + Style.RESET_ALL)
+            print(Fore.CYAN + "[SINGLETON] Initialized new HubspotService instance" + Style.RESET_ALL)
         else:
             print(Fore.CYAN + "[SINGLETON] Reusing existing HubspotService instance" + Style.RESET_ALL)
 
@@ -156,7 +156,7 @@ class HubspotService:
 
     def get_deals_by_stage(self, stage_name: str) -> List[Dict[str, Any]]:
         """Get all deals in a specific pipeline stage"""
-        print(Fore.GREEN + f"Getting deals for stage: '{stage_name}'" + Style.RESET_ALL)
+        print(Fore.CYAN + f"Getting deals for stage: '{stage_name}'" + Style.RESET_ALL)
         
         all_deals = []
         after = None
@@ -220,25 +220,25 @@ class HubspotService:
         
         # If no deals found, try case-insensitive match
         if not stage_deals:
-            print(Fore.GREEN + f"No exact matches for '{stage_name}', trying case-insensitive match..." + Style.RESET_ALL)
+            print(Fore.CYAN + f"No exact matches for '{stage_name}', trying case-insensitive match..." + Style.RESET_ALL)
             stage_deals = [deal for deal in all_deals if deal['stage'].lower() == stage_name.lower()]
         
         # If still no deals, try matching with trimmed whitespace
         if not stage_deals:
-            print(Fore.GREEN + f"No case-insensitive matches, trying with trimmed whitespace..." + Style.RESET_ALL)
+            print(Fore.CYAN + f"No case-insensitive matches, trying with trimmed whitespace..." + Style.RESET_ALL)
             stage_deals = [deal for deal in all_deals if deal['stage'].strip() == stage_name.strip()]
         
         # If still no deals, try looser matching (contains)
         if not stage_deals:
-            print(Fore.GREEN + f"No whitespace-trimmed matches, checking if any stage contains '{stage_name}'..." + Style.RESET_ALL)
+            print(Fore.CYAN + f"No whitespace-trimmed matches, checking if any stage contains '{stage_name}'..." + Style.RESET_ALL)
             stage_deals = [deal for deal in all_deals if stage_name.lower() in deal['stage'].lower()]
             
             # Print more detailed debug info if we found matches with looser criteria
             if stage_deals:
                 similar_stages = set(deal['stage'] for deal in stage_deals)
-                print(Fore.GREEN + f"Found similar stages: {similar_stages}" + Style.RESET_ALL)
+                print(Fore.CYAN + f"Found similar stages: {similar_stages}" + Style.RESET_ALL)
         
-        print(Fore.GREEN + f"Found {len(stage_deals)} deals in stage: '{stage_name}'" + Style.RESET_ALL)
+        print(Fore.CYAN + f"Found {len(stage_deals)} deals in stage: '{stage_name}'" + Style.RESET_ALL)
         
         # Add stage ID debugging info
         if not stage_deals:
@@ -256,9 +256,9 @@ class HubspotService:
                         potential_stage_ids.append((stage_id, stage_label))
             
             if potential_stage_ids:
-                print(f"Potential matching stage IDs: {potential_stage_ids}")
+                print(Fore.CYAN + f"Potential matching stage IDs: {potential_stage_ids}" + Style.RESET_ALL)
             else:
-                print(f"No potential matching stage IDs found in mapping")
+                print(Fore.CYAN + f"No potential matching stage IDs found in mapping" + Style.RESET_ALL)
         
         if not stage_deals:
             return []
@@ -297,7 +297,7 @@ class HubspotService:
                     "Closed_Lost": "Yes" if deal['is_closed_lost'] == "true" else "No"
                 })
             except Exception as e:
-                print(f"Error processing deal: {str(e)}")
+                print(Fore.RED + f"Error processing deal: {str(e)}" + Style.RESET_ALL)
                 continue
         
         return processed_deals
@@ -381,18 +381,18 @@ class HubspotService:
         if (self._deals_cache is not None and 
             self._deals_cache_timestamp is not None and 
             current_time - self._deals_cache_timestamp < self._deals_cache_ttl):
-            print(Fore.GREEN + f"[CACHE HIT] Returning cached deals data (age: {int(current_time - self._deals_cache_timestamp)}s)" + Style.RESET_ALL)
+            print(Fore.CYAN + f"[CACHE HIT] Returning cached deals data (age: {int(current_time - self._deals_cache_timestamp)}s)" + Style.RESET_ALL)
             return self._deals_cache
         else:
             if self._deals_cache is None:
-                print(Fore.YELLOW + "[CACHE MISS] No cache exists" + Style.RESET_ALL)
+                print(Fore.CYAN + "[CACHE MISS] No cache exists" + Style.RESET_ALL)
             elif self._deals_cache_timestamp is None:
-                print(Fore.YELLOW + "[CACHE MISS] No cache timestamp" + Style.RESET_ALL)
+                print(Fore.CYAN + "[CACHE MISS] No cache timestamp" + Style.RESET_ALL)
             else:
                 age = int(current_time - self._deals_cache_timestamp)
-                print(Fore.YELLOW + f"[CACHE MISS] Cache expired (age: {age}s, TTL: {self._deals_cache_ttl}s)" + Style.RESET_ALL)
+                print(Fore.CYAN + f"[CACHE MISS] Cache expired (age: {age}s, TTL: {self._deals_cache_ttl}s)" + Style.RESET_ALL)
 
-        print(Fore.RED + "[CACHE MISS] Fetching fresh deals data" + Style.RESET_ALL)
+        print(Fore.CYAN + "[CACHE MISS] Fetching fresh deals data" + Style.RESET_ALL)
         deals_url = "https://api.hubapi.com/crm/v3/objects/deals"
         params = {
             "properties": "dealname,dealstage,amount,hs_object_id,hs_lastmodifieddate,createdate,pipeline,closedate,hubspot_owner_id",
@@ -517,12 +517,12 @@ class HubspotService:
                 
             validated_deals.append(deal)
         
-        print(Fore.GREEN + f"Original deal count: {len(all_deals)}, Validated deal count: {len(validated_deals)}" + Style.RESET_ALL)
+        print(Fore.CYAN + f"Original deal count: {len(all_deals)}, Validated deal count: {len(validated_deals)}" + Style.RESET_ALL)
         
         # Cache the validated deals
         self._deals_cache = validated_deals
         self._deals_cache_timestamp = current_time
-        print(Fore.GREEN + f"[CACHE UPDATE] Updated cache with {len(validated_deals)} deals" + Style.RESET_ALL)
+        print(Fore.CYAN + f"[CACHE UPDATE] Updated cache with {len(validated_deals)} deals" + Style.RESET_ALL)
         
         return validated_deals
 
@@ -530,7 +530,7 @@ class HubspotService:
         """Get timeline data for a specific deal. Returns email content if include_content is True"""
         import concurrent.futures
         from datetime import datetime
-        print(Fore.GREEN + f"Getting timeline for deal: {deal_name}" + Style.RESET_ALL)
+        print(Fore.CYAN + f"Getting timeline for deal: {deal_name}" + Style.RESET_ALL)
         
         try:
             if hasattr(self, '_find_deal_id'):
@@ -559,7 +559,7 @@ class HubspotService:
                         else:
                             break
                     else:
-                        print(Fore.GREEN + f"[ERROR][get_deal_timeline] Error fetching deals: {response.status_code}" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"[ERROR][get_deal_timeline] Error fetching deals: {response.status_code}" + Style.RESET_ALL)
                         return {"events": [], "start_date": None, "end_date": None}
                 
                 # Find the deal ID by matching deal name
@@ -580,24 +580,24 @@ class HubspotService:
             engagement_response = self._session.get(engagement_url) if hasattr(self, '_session') else requests.get(engagement_url, headers=self.headers)
             
             if engagement_response.status_code != 200:
-                print(Fore.GREEN + f"[ERROR][get_deal_timeline] Error fetching engagements: {engagement_response.status_code}" + Style.RESET_ALL)
+                print(Fore.CYAN + f"[ERROR][get_deal_timeline] Error fetching engagements: {engagement_response.status_code}" + Style.RESET_ALL)
                 return {"events": [], "start_date": None, "end_date": None}
             
             engagement_results = engagement_response.json().get("results", [])
             engagement_ids = [result.get("id") for result in engagement_results]
             
             if not engagement_ids:
-                print(Fore.GREEN + f"No activities found for deal: {deal_name}" + Style.RESET_ALL)
+                print(Fore.CYAN + f"No activities found for deal: {deal_name}" + Style.RESET_ALL)
                 return {"events": [], "start_date": None, "end_date": None}
             
-            print(Fore.GREEN + f"Found {len(engagement_ids)} activities for this deal" + Style.RESET_ALL)
+            print(Fore.CYAN + f"Found {len(engagement_ids)} activities for this deal" + Style.RESET_ALL)
             
             # Initialize or clear the cache for this deal
             if not hasattr(self, '_engagement_cache'):
                 self._engagement_cache = {}
             
             deal_cache_key = f"deal_{deal_id}"
-            print(Fore.GREEN + f"Adding this deal to cache: {deal_cache_key}" + Style.RESET_ALL)
+            print(Fore.CYAN + f"Adding this deal to cache: {deal_cache_key}" + Style.RESET_ALL)
             self._engagement_cache[deal_cache_key] = {}
             
             timeline_events = []
@@ -753,7 +753,7 @@ class HubspotService:
                         "event_id": event_id
                     }
                 except Exception as e:
-                    print(Fore.GREEN + f"[ERROR][get_deal_timeline] Error processing engagement {eng_id}: {str(e)}" + Style.RESET_ALL)
+                    print(Fore.RED + f"[ERROR][get_deal_timeline] Error processing engagement {eng_id}: {str(e)}" + Style.RESET_ALL)
                     import traceback
                     traceback.print_exc()
                     return None
@@ -785,7 +785,7 @@ class HubspotService:
                         # Store cache updates for applying after processing
                         cache_updates[result["event_id"]] = result["cache_data"]
                     except Exception as e:
-                        print(Fore.GREEN + f"[ERROR][get_deal_timeline] Error processing future result: {str(e)}" + Style.RESET_ALL)
+                        print(Fore.RED + f"[ERROR][get_deal_timeline] Error processing future result: {str(e)}" + Style.RESET_ALL)
                         continue
             
             # Apply cache updates
@@ -835,7 +835,7 @@ class HubspotService:
             
             return response
         except Exception as e:
-            print(Fore.GREEN + f"[ERROR][get_deal_timeline] Error in get_deal_timeline: {str(e)}" + Style.RESET_ALL)
+            print(Fore.RED + f"[ERROR][get_deal_timeline] Error in get_deal_timeline: {str(e)}" + Style.RESET_ALL)
             import traceback
             traceback.print_exc()
             return {"events": [], "start_date": None, "end_date": None, "error": str(e)}
@@ -847,7 +847,7 @@ class HubspotService:
             self._deal_id_cache = {}
             
         if deal_name in self._deal_id_cache:
-            print(Fore.GREEN + f"[CACHE LOOKUP] Deal ID found in cache: {deal_name}" + Style.RESET_ALL)
+            print(Fore.CYAN + f"[CACHE LOOKUP] Deal ID found in cache: {deal_name}" + Style.RESET_ALL)
             return self._deal_id_cache[deal_name]
             
         # Try direct search first (much faster)
@@ -898,7 +898,7 @@ class HubspotService:
                 else:
                     break
             else:
-                print(Fore.GREEN + f"[ERROR][get_deal_timeline] Error fetching deals: {response.status_code}" + Style.RESET_ALL)
+                print(Fore.RED + f"[ERROR][get_deal_timeline] Error fetching deals: {response.status_code}" + Style.RESET_ALL)
                 return None
         
         # Find the deal ID by matching deal name
@@ -934,12 +934,12 @@ class HubspotService:
 
     def get_deal_activities_count(self, deal_name: str) -> int:
         """Get the count of activities for a specific deal"""
-        print(Fore.GREEN + f"Getting activities count for deal: {deal_name}" + Style.RESET_ALL)
+        print(Fore.CYAN + f"Getting activities count for deal: {deal_name}" + Style.RESET_ALL)
 
         # First try to get deal ID from cache
         if hasattr(self, '_deal_id_cache') and deal_name in self._deal_id_cache:
             deal_id = self._deal_id_cache[deal_name]
-            print(Fore.GREEN + f"Found deal ID in cache: {deal_id}" + Style.RESET_ALL)
+            print(Fore.CYAN + f"Found deal ID in cache: {deal_id}" + Style.RESET_ALL)
         else:
             # If not in cache, try to find it in the deals cache
             if self._deals_cache is not None:
@@ -948,7 +948,7 @@ class HubspotService:
                         deal_id = deal.get('dealId')
                         if deal_id:
                             self._deal_id_cache[deal_name] = deal_id
-                            print(Fore.GREEN + f"Found deal ID in deals cache: {deal_id}" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"Found deal ID in deals cache: {deal_id}" + Style.RESET_ALL)
                             break
                 else:
                     print(Fore.YELLOW + f"Deal '{deal_name}' not found in deals cache, fetching fresh data..." + Style.RESET_ALL)
@@ -959,20 +959,20 @@ class HubspotService:
                             deal_id = deal.get('dealId')
                             if deal_id:
                                 self._deal_id_cache[deal_name] = deal_id
-                                print(Fore.GREEN + f"Found deal ID in fresh data: {deal_id}" + Style.RESET_ALL)
+                                print(Fore.CYAN + f"Found deal ID in fresh data: {deal_id}" + Style.RESET_ALL)
                                 break
                     else:
                         print(Fore.RED + f"Deal with name '{deal_name}' not found in any cache or fresh data." + Style.RESET_ALL)
                         return 0
             else:
-                print(Fore.YELLOW + "No deals cache available, fetching fresh data..." + Style.RESET_ALL)
+                print(Fore.RED + "No deals cache available, fetching fresh data..." + Style.RESET_ALL)
                 deals = self.get_all_deals()
                 for deal in deals:
                     if deal.get('dealname') == deal_name:
                         deal_id = deal.get('dealId')
                         if deal_id:
                             self._deal_id_cache[deal_name] = deal_id
-                            print(Fore.GREEN + f"Found deal ID in fresh data: {deal_id}" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"Found deal ID in fresh data: {deal_id}" + Style.RESET_ALL)
                             break
                 else:
                     print(Fore.RED + f"Deal with name '{deal_name}' not found in fresh data." + Style.RESET_ALL)

@@ -4,7 +4,9 @@ import requests
 import json
 from datetime import datetime, timedelta
 from app.services.llm_service import ask_openai, ask_anthropic
+from app.utils.prompts import champion_prompt, business_pain_prompt
 from collections import OrderedDict
+
 import time
 
 init()
@@ -169,7 +171,7 @@ class GongService:
             if "explanation" not in intent_json:
                 intent_json["explanation"] = "No explanation provided"
                 
-            print(Fore.CYAN + f"Buyer Intent (based on call transcript) - call dated {call_date_str}: {intent_json['intent']}" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"Buyer Intent (based on call transcript) - call dated {call_date_str}: {intent_json['intent']}" + Style.RESET_ALL)
             return intent_json
         except Exception as e:
             print(Fore.RED + f"Error in get_buyer_intent_json: {str(e)}" + Style.RESET_ALL)
@@ -229,7 +231,7 @@ class GongService:
                         print(f"Could not find a call with title '{call_title}' on {call_date_str} either!")
                         return default_response
                 except Exception as e:
-                    print(f"Error checking next day: {str(e)}")
+                    print(Fore.RED + f"Error checking next day: {str(e)}" + Style.RESET_ALL)
                     return default_response
 
             if call_id:
@@ -238,7 +240,7 @@ class GongService:
                 full_transcript, topics = self.get_transcript_and_topics(call_id, start_time, end_time)
 
                 if not full_transcript:
-                    print("No transcript found")
+                    print(Fore.RED + "No transcript found" + Style.RESET_ALL)
                     return {
                         "intent": "No Transcript",
                         "explanation": f"Call found but transcript unavailable for '{call_title}' on {call_date_str}"
@@ -294,10 +296,10 @@ class GongService:
             cache_key = company_name.lower()
             cached_result = self.champion_cache.get(cache_key)
             if cached_result:
-                print(Fore.GREEN + f"Retrieved champion data for '{company_name}' from cache" + Style.RESET_ALL)
+                print(Fore.MAGENTA + f"Retrieved champion data for '{company_name}' from cache" + Style.RESET_ALL)
                 return cached_result
 
-            print(Fore.GREEN + f"Extracted company name: {company_name}" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"Extracted company name: {company_name}" + Style.RESET_ALL)
 
             if target_date is None:
                 target_date = datetime.now()
@@ -306,7 +308,7 @@ class GongService:
             start_date = target_date
             end_date = target_date + timedelta(days=self.reschedule_window)
             
-            print(Fore.CYAN + f"Searching for calls '{company_name}' around {target_date.strftime('%Y-%m-%d')} + {self.reschedule_window} days" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"Searching for calls '{company_name}' around {target_date.strftime('%Y-%m-%d')} + {self.reschedule_window} days" + Style.RESET_ALL)
             
             # Dictionary to store transcripts by speaker
             speaker_data = {}
@@ -345,7 +347,7 @@ class GongService:
                     
                     if company_name.lower() in title:
                         matching_calls.append(call)
-                        print(Fore.CYAN + f"[MATCH] {date_str}: Comparing '{company_name.lower()}' with '{title}'" + Style.RESET_ALL)
+                        print(Fore.MAGENTA + f"[MATCH] {date_str}: Comparing '{company_name.lower()}' with '{title}'" + Style.RESET_ALL)
 
                 # sort the matching calls by date
                 matching_calls.sort(key=lambda x: x.get("startTime", ""))
@@ -455,12 +457,11 @@ class GongService:
                                     for sentence in part["sentences"]:
                                         speaker_data[unique_key]["full_transcript"] += sentence.get("text", "") + " "
                 
-                # Move to next day
                 current_date += timedelta(days=1)
             
-            # Format the results as an array
-            result = list(speaker_data.values())
-            print(Fore.GREEN + f"\nTotal speakers found: {len(result)} = [{', '.join([speaker['speakerName'] for speaker in result])}]" + Style.RESET_ALL)
+            speaker_transcripts = list(speaker_data.values())
+
+            print(Fore.MAGENTA + f"\nTotal speakers found: {len(speaker_transcripts)} = [{', '.join([speaker['speakerName'] for speaker in speaker_transcripts])}]" + Style.RESET_ALL)
 
             champion_prompt = """
                 You are a smart Sales Operations Analyst that analyzes Sales calls.
@@ -486,34 +487,31 @@ class GongService:
                 STRICTLY return the JSON, nothing else. Use proper JSON boolean values (true/false, not True/False).
             """
 
-            # loop through result, for each speaker (only if they are external) print the full transcript
             llm_responses = []
-            for speaker in result[:20]:
-                if "galileo" not in speaker["email"].lower():
-                    print(Fore.CYAN + f"Analyzing {speaker['email']}..." + Style.RESET_ALL)
-                    transcript = speaker["full_transcript"]
-                    llm_response = ask_anthropic(
-                        user_content=champion_prompt.format(transcript=transcript),
-                        system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
-                    )
+            for speaker_transcript in speaker_transcripts[:20]:
+                if "galileo" not in speaker_transcript["email"].lower():
+                    print(Fore.MAGENTA + f"Analyzing {speaker_transcript['email']}..." + Style.RESET_ALL)
+
+                    transcript = speaker_transcript["full_transcript"]
+                    
                     try:
-                        # Clean up the response by removing markdown code blocks and newlines
-                        cleaned_response = llm_response.replace('```json', '').replace('```', '').replace('\n', '').strip()
-                        # Replace Python boolean values with JSON boolean values
-                        cleaned_response = cleaned_response.replace('True', 'true').replace('False', 'false')
-                        llm_response = json.loads(cleaned_response)
-                        llm_response["email"] = speaker["email"]
-                        llm_responses.append(llm_response)
+                        llm_response_champions = ask_anthropic(
+                            user_content=champion_prompt.format(transcript=transcript),
+                            system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
+                        ).replace('```json', '').replace('```', '').replace('\n', '').replace('True', 'true').replace('False', 'false').strip()
+                        llm_response_champions = json.loads(llm_response_champions)
+                        llm_response_champions["email"] = speaker_transcript["email"]
+                        llm_responses.append(llm_response_champions)
                     except json.JSONDecodeError as e:
                         print(Fore.RED + f"Error parsing LLM response: {e}" + Style.RESET_ALL)
-                        print(Fore.RED + f"Raw response: {llm_response}" + Style.RESET_ALL)
+                        print(Fore.RED + f"Raw response: {llm_response_champions}" + Style.RESET_ALL)
                         continue
 
-            print(Fore.GREEN + f"\nFinal results: {len(llm_responses)} speakers analyzed" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"\nFinal results: {len(llm_responses)} speakers analyzed" + Style.RESET_ALL)
             
             # Cache the results with the company name as the key
             self.champion_cache.put(cache_key, llm_responses)
-            print(Fore.GREEN + f"Cached champion data for '{company_name}'" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"Cached champion data for '{company_name}'" + Style.RESET_ALL)
             
             return llm_responses
             
@@ -526,13 +524,13 @@ class GongService:
     def clear_champion_cache(self):
         """Clears the champion cache"""
         self.champion_cache.clear()
-        print(Fore.GREEN + "Champion cache cleared" + Style.RESET_ALL)
+        print(Fore.MAGENTA + "Champion cache cleared" + Style.RESET_ALL)
         
     def remove_from_champion_cache(self, deal_name):
         """Removes a specific deal from the champion cache"""
         key = self.extract_company_name(deal_name).lower()
         self.champion_cache.remove(key)
-        print(Fore.GREEN + f"Removed '{key}' from champion cache" + Style.RESET_ALL)
+        print(Fore.MAGENTA + f"Removed '{key}' from champion cache" + Style.RESET_ALL)
         
     def get_cached_champion_deals(self):
         """Returns a list of deal names currently in the cache"""
