@@ -306,7 +306,7 @@ class GongService:
             start_date = target_date
             end_date = target_date + timedelta(days=self.reschedule_window)
             
-            print(Fore.CYAN + f"Searching for calls '{company_name}' around {target_date.strftime('%Y-%m-%d')} +/- {self.reschedule_window} days" + Style.RESET_ALL)
+            print(Fore.CYAN + f"Searching for calls '{company_name}' around {target_date.strftime('%Y-%m-%d')} + {self.reschedule_window} days" + Style.RESET_ALL)
             
             # Dictionary to store transcripts by speaker
             speaker_data = {}

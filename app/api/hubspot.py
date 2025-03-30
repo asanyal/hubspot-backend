@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Request
 from typing import List, Dict, Any, Optional
 from app.services.hubspot_service import HubspotService
 from app.services.gong_service import GongService
+from app.services.session_service import SessionService
 from collections import Counter
 from datetime import datetime
 import requests
@@ -14,12 +15,21 @@ from datetime import datetime
 import time
 from colorama import Fore, Style, init
 from pydantic import BaseModel
+import asyncio
+from concurrent.futures import ThreadPoolExecutor, CancelledError
+import threading
 
 init()
 
 router = APIRouter()
 hubspot_service = HubspotService()
+session_service = SessionService()
 
+# Store ongoing requests by browser ID
+ongoing_requests = {}
+
+# Add after other global variables
+thread_pool = ThreadPoolExecutor(max_workers=4)  # Limit concurrent background tasks
 
 @router.get("/health", status_code=200)
 async def health_check():
@@ -155,10 +165,18 @@ async def get_all_deals():
         raise HTTPException(status_code=500, detail=f"Error fetching deals: {str(e)}")
 
 @router.get("/deal-timeline", response_model=Dict[str, Any])
-async def get_deal_timeline(dealName: str = Query(..., description="The name of the deal")):
+async def get_deal_timeline(
+    request: Request,
+    dealName: str = Query(..., description="The name of the deal")
+):
     """Get timeline data for a specific deal"""
     try:
         print(Fore.RED + f"API: Getting timeline for deal: {dealName}" + Style.RESET_ALL)
+        
+        # Get browser ID from request headers
+        browser_id = request.headers.get("X-Browser-ID")
+        if not browser_id:
+            raise HTTPException(status_code=400, detail="Browser ID is required")
         
         # measure the time it takes to get the timeline data
         start_time = time.time()
@@ -299,8 +317,59 @@ class ContactsAndChampionResponse(BaseModel):
     total_contacts: int
     champions_count: int
 
+def process_champion_request_sync(browser_id: str, deal_name: str, target_date: datetime):
+    """Process the champion request in the background (synchronous version)"""
+    try:
+        print(Fore.CYAN + f"Starting champion request processing for {deal_name}" + Style.RESET_ALL)
+        # Instantiate GongService directly
+        gong_service = GongService()
+        
+        # measure the time it takes to process
+        start_time = time.time()
+        print(Fore.CYAN + f"Calling get_speaker_champion_results for {deal_name}" + Style.RESET_ALL)
+        speaker_champion_results = gong_service.get_speaker_champion_results(deal_name, target_date=target_date)
+        end_time = time.time()
+        
+        print(Fore.GREEN + f"[PERFORMANCE][contacts-and-champion] Time took: {end_time - start_time} s" + Style.RESET_ALL)
+        
+        # Count champions
+        champions_count = sum(1 for result in speaker_champion_results if result.get('champion', False))
+        
+        # Create a composite cache key
+        cache_key = f"{browser_id}_{deal_name}"
+        
+        # Log the result structure before storing
+        print(Fore.CYAN + f"Result structure before storing:" + Style.RESET_ALL)
+        print(f"speaker_champion_results: {speaker_champion_results}")
+        print(f"champions_count: {champions_count}")
+        
+        # Store the results
+        result = {
+            "contacts": speaker_champion_results,
+            "total_contacts": len(speaker_champion_results),
+            "champions_count": champions_count
+        }
+        
+        ongoing_requests[cache_key] = {
+            "status": "completed",
+            "result": result
+        }
+        print(Fore.GREEN + f"Successfully processed champion request for {deal_name}" + Style.RESET_ALL)
+    except Exception as e:
+        print(Fore.RED + f"Error in process_champion_request_sync: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        # Use composite cache key here too
+        cache_key = f"{browser_id}_{deal_name}"
+        ongoing_requests[cache_key] = {
+            "status": "error",
+            "error": str(e)
+        }
+
 @router.get("/contacts-and-champion", response_model=ContactsAndChampionResponse)
 async def get_contacts_and_champion(
+    background_tasks: BackgroundTasks,
+    request: Request,
     dealName: str = Query(..., description="The name of the deal"),
     date: str = Query(..., description="The date to search around in YYYY-MM-DD format")
 ):
@@ -312,28 +381,143 @@ async def get_contacts_and_champion(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Please use YYYY-MM-DD format.")
         
-        # Instantiate GongService directly
-        gong_service = GongService()
-        
-        # measure the time it takes to process
-        start_time = time.time()
-        speaker_champion_results = gong_service.get_speaker_champion_results(dealName, target_date=target_date)
-        end_time = time.time()
-        
-        print(Fore.RED + f"[PERFORMANCE][contacts-and-champion] Time took: {end_time - start_time} s" + Style.RESET_ALL)
-        
-        # Count champions
-        champions_count = sum(1 for result in speaker_champion_results if result.get('champion', False))
-        
-        return {
-            "contacts": speaker_champion_results,
-            "total_contacts": len(speaker_champion_results),
-            "champions_count": champions_count
+        # Get browser ID from request headers
+        browser_id = request.headers.get("X-Browser-ID")
+        if not browser_id:
+            raise HTTPException(status_code=400, detail="Browser ID is required")
+
+        # Create composite cache key
+        cache_key = f"{browser_id}_{dealName}"
+        print(Fore.CYAN + f"Processing request for browser: {browser_id}, deal: {dealName}" + Style.RESET_ALL)
+
+        # Check if there's an ongoing request for this browser and deal
+        if cache_key in ongoing_requests:
+            ongoing_request = ongoing_requests[cache_key]
+            if ongoing_request["status"] == "processing":
+                # Cancel the previous request and start a new one
+                print(Fore.YELLOW + f"Cancelling previous request for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                ongoing_request["status"] = "cancelled"
+                # Wait a bit for the previous request to clean up
+                await asyncio.sleep(1)
+            elif ongoing_request["status"] == "completed":
+                # Validate the cached result has the required structure
+                result = ongoing_request.get("result", {})
+                print(Fore.CYAN + f"Validating cached result structure:" + Style.RESET_ALL)
+                print(f"Result: {result}")
+                print(f"Has contacts: {'contacts' in result}")
+                print(f"Has total_contacts: {'total_contacts' in result}")
+                print(f"Has champions_count: {'champions_count' in result}")
+                print(f"Contacts length: {len(result.get('contacts', []))}")
+                
+                if (result and 
+                    "contacts" in result and 
+                    "total_contacts" in result and 
+                    "champions_count" in result):
+                    print(Fore.GREEN + f"Returning valid cached result for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                    return result
+                else:
+                    print(Fore.YELLOW + f"Invalid or empty cached result for browser {browser_id}, deal {dealName}, reprocessing..." + Style.RESET_ALL)
+                    del ongoing_requests[cache_key]
+            elif ongoing_request["status"] == "error":
+                # Clear the error state and start fresh
+                print(Fore.YELLOW + f"Clearing error state for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                del ongoing_requests[cache_key]
+
+        # Mark this request as processing
+        ongoing_requests[cache_key] = {
+            "status": "processing",
+            "start_time": datetime.now()
         }
+
+        # Start the background task using thread pool
+        print(Fore.LIGHTBLUE_EX + f"Creating background task for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+        
+        # Submit the task to the thread pool
+        future = thread_pool.submit(
+            process_champion_request_sync,
+            browser_id,
+            dealName,
+            target_date
+        )
+        
+        # Add a callback to handle task completion
+        def done_callback(future):
+            try:
+                future.result()  # This will raise any exceptions that occurred
+            except Exception as e:
+                print(Fore.RED + f"Background task failed: {str(e)}" + Style.RESET_ALL)
+                if cache_key in ongoing_requests:
+                    ongoing_requests[cache_key]["status"] = "error"
+                    ongoing_requests[cache_key]["error"] = str(e)
+        
+        future.add_done_callback(done_callback)
+        print(Fore.GREEN + f"Background task submitted for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+
+        # Wait for the result with a timeout
+        start_time = time.time()
+        timeout = 120  # 2 minutes timeout
+        check_interval = 0.5  # Check every 0.5 seconds
+        
+        while True:
+            if cache_key in ongoing_requests:
+                request_data = ongoing_requests[cache_key]
+                if request_data["status"] == "completed":
+                    # Validate the result before returning
+                    result = request_data.get("result", {})
+                    print(Fore.CYAN + f"Validating result structure:" + Style.RESET_ALL)
+                    print(f"Result: {result}")
+                    print(f"Has contacts: {'contacts' in result}")
+                    print(f"Has total_contacts: {'total_contacts' in result}")
+                    print(f"Has champions_count: {'champions_count' in result}")
+                    print(f"Contacts length: {len(result.get('contacts', []))}")
+                    
+                    if (result and 
+                        "contacts" in result and 
+                        "total_contacts" in result and 
+                        "champions_count" in result):
+                        print(Fore.GREEN + f"Request completed successfully for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                        return result
+                    else:
+                        print(Fore.RED + f"Invalid result structure for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                        print(Fore.RED + f"Result: {result}" + Style.RESET_ALL)
+                        request_data["status"] = "error"
+                        request_data["error"] = "Invalid result structure"
+                elif request_data["status"] == "error":
+                    error_msg = request_data.get("error", "Unknown error")
+                    print(Fore.RED + f"Request failed for browser {browser_id}, deal {dealName}: {error_msg}" + Style.RESET_ALL)
+                    raise HTTPException(status_code=500, detail=error_msg)
+                elif request_data["status"] == "cancelled":
+                    print(Fore.YELLOW + f"Request was cancelled for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                    raise HTTPException(status_code=409, detail="Request was cancelled by a new request")
+            
+            # Check for timeout
+            if time.time() - start_time > timeout:
+                print(Fore.RED + f"Request timed out after {timeout} seconds for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                # Clean up the request
+                if cache_key in ongoing_requests:
+                    del ongoing_requests[cache_key]
+                raise HTTPException(
+                    status_code=504, 
+                    detail=f"Request timed out after {timeout} seconds. The operation is still processing in the background."
+                )
+            
+            # Log progress every 10 seconds
+            elapsed = time.time() - start_time
+            if elapsed % 10 < check_interval:
+                print(Fore.LIGHTBLUE_EX + f"Request still processing for browser {browser_id}, deal {dealName}... {int(elapsed)}s elapsed" + Style.RESET_ALL)
+            
+            await asyncio.sleep(check_interval)
+
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        print(Fore.RED + f"Error in contacts-and-champion endpoint: {str(e)}" + Style.RESET_ALL)
+        print(Fore.RED + f"Unexpected error in contacts-and-champion endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
+        # Clean up the request if it exists
+        if cache_key in ongoing_requests:
+            del ongoing_requests[cache_key]
         raise HTTPException(status_code=500, detail=f"Error identifying contacts and champion: {str(e)}")
 
 def parse_date(timestamp):
