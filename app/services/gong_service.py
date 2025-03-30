@@ -1,15 +1,42 @@
 from colorama import Fore, Style, init
-from app.core.config import settings
+
 import requests
 import json
 from datetime import datetime, timedelta
-from app.services.llm_service import ask_openai, ask_anthropic
-from app.utils.prompts import champion_prompt, business_pain_prompt
 from collections import OrderedDict
+from dataclasses import dataclass
+from typing import Dict, List
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from app.core.config import settings
+from app.services.llm_service import ask_anthropic
+from app.utils.prompts import champion_prompt
 
 import time
 
 init()
+
+@dataclass
+class Speaker:
+    """Represents a speaker in a call with their details and transcript."""
+    speaker_id: str
+    speaker_name: str
+    email: str
+    affiliation: str  # Internal or External
+    full_transcript: str = ""
+
+    def to_dict(self) -> Dict:
+        """Convert the speaker object to a dictionary format."""
+        return {
+            "speakerId": self.speaker_id,
+            "speakerName": self.speaker_name,
+            "email": self.email,
+            "affiliation": self.affiliation,
+            "full_transcript": self.full_transcript
+        }
 
 class LRUCache:
     """
@@ -286,6 +313,153 @@ class GongService:
         )
         return response.strip()
 
+    def populate_speaker_data(self, company_name: str, start_date: datetime, end_date: datetime) -> Dict[str, Speaker]:
+        """Populate speaker data from Gong API calls within the given date range."""
+        speaker_data: Dict[str, Speaker] = {}
+
+        # Iterate through each day in the range
+        current_date = start_date
+        while current_date <= end_date:
+            date_str = current_date.strftime("%Y-%m-%d")
+            
+            # Get calls for this day
+            url = "https://us-5738.api.gong.io/v2/calls"
+            from_datetime = f"{date_str}T00:00:00Z"
+            to_datetime = f"{date_str}T23:59:59Z"
+            
+            params = {
+                "fromDateTime": from_datetime,
+                "toDateTime": to_datetime
+            }
+            
+            response = requests.get(
+                url, 
+                auth=(self.access_key, self.client_secret), 
+                params=params
+            )
+            
+            if not response.ok:
+                current_date += timedelta(days=1)
+                continue
+                
+            calls = response.json().get("calls", [])
+
+            # Loop through all the calls and match the title
+            matching_calls = []
+            for call in calls:
+                title = call.get("title", "").lower()
+                
+                if company_name.lower() in title:
+                    matching_calls.append(call)
+                    print(Fore.MAGENTA + f"[MATCH] {date_str}: Comparing '{company_name.lower()}' with '{title}'" + Style.RESET_ALL)
+
+            # sort the matching calls by date
+            matching_calls.sort(key=lambda x: x.get("startTime", ""))
+
+            # Process each matching call (latest 10 calls)
+            for call in matching_calls[:10]:
+                call_id = call.get("id")
+                
+                # Get extensive call data for speaker information
+                extensive_url = "https://us-5738.api.gong.io/v2/calls/extensive"
+                headers = {'Content-Type': 'application/json'}
+                extensive_payload = {
+                    "filter": {
+                        "callIds": [str(call_id)]
+                    },
+                    "contentSelector": {
+                        "exposedFields": {
+                            "parties": True,
+                            "interaction": {
+                                "speakers": True
+                            }
+                        }
+                    }
+                }
+                
+                extensive_response = requests.post(
+                    extensive_url,
+                    auth=(self.access_key, self.client_secret),
+                    headers=headers,
+                    json=extensive_payload
+                )
+                
+                if not extensive_response.ok:
+                    print(Fore.RED + f"Error fetching extensive data: {extensive_response.status_code}" + Style.RESET_ALL)
+                    print(Fore.RED + f"Response body: {extensive_response.text}" + Style.RESET_ALL)
+                    continue
+                
+                speaker_info = {}
+                extensive_data = extensive_response.json()
+                calls_data = extensive_data.get("calls", [])
+                
+                for call_data in calls_data:
+                    # Extract party information (speakers)
+                    parties = call_data.get("parties", [])
+                    
+                    for party in parties:
+                        speaker_id = party.get("speakerId")
+                        if speaker_id:
+                            speaker_info[speaker_id] = {
+                                "name": party.get("name", "Unknown"),
+                                "email": party.get("emailAddress", ""),
+                                "affiliation": party.get("affiliation", "Unknown")
+                            }
+                
+                # Get transcript for this call
+                transcript_url = 'https://us-5738.api.gong.io/v2/calls/transcript'
+                transcript_payload = {
+                    "filter": {
+                        "fromDateTime": from_datetime,
+                        "toDateTime": to_datetime,
+                        "callIds": [str(call_id)]
+                    }
+                }
+
+                transcript_response = requests.post(
+                    transcript_url, 
+                    auth=(self.access_key, self.client_secret), 
+                    headers=headers, 
+                    json=transcript_payload
+                )
+                
+                if not transcript_response.ok:
+                    print(Fore.RED + f"Error fetching transcript: {transcript_response.status_code}" + Style.RESET_ALL)
+                    print(Fore.RED + f"Response body: {transcript_response.text}" + Style.RESET_ALL)
+                    continue
+                    
+                transcript_data = transcript_response.json()
+                
+                # Process all transcripts
+                if "callTranscripts" in transcript_data:
+                    for transcript in transcript_data["callTranscripts"]:
+                        for part in transcript.get("transcript", []):
+                            speaker_id = part.get("speakerId", "unknown")
+                            
+                            # Get speaker details from our mapping
+                            details = speaker_info.get(speaker_id, {})
+                            speaker_name = details.get("name", "Unknown Speaker")
+                            speaker_email = details.get("email", "")
+                            speaker_affiliation = details.get("affiliation", "Unknown")
+                            
+                            # Create or update speaker object
+                            if speaker_id not in speaker_data:
+                                speaker_data[speaker_id] = Speaker(
+                                    speaker_id=speaker_id,
+                                    speaker_name=speaker_name,
+                                    email=speaker_email,
+                                    affiliation=speaker_affiliation
+                                )
+                            
+                            # Extract and concatenate all sentences from this speaker
+                            if "sentences" in part:
+                                for sentence in part["sentences"]:
+                                    speaker_data[speaker_id].full_transcript += sentence.get("text", "") + " "
+            
+            current_date += timedelta(days=1)
+        
+        return speaker_data
+
     def get_speaker_champion_results(self, call_title, target_date=None):
         try:
             company_name = self.extract_company_name(call_title)
@@ -310,182 +484,13 @@ class GongService:
             
             print(Fore.MAGENTA + f"Searching for calls '{company_name}' around {target_date.strftime('%Y-%m-%d')} + {self.reschedule_window} days" + Style.RESET_ALL)
             
-            # Dictionary to store transcripts by speaker
-            speaker_data = {}
-            
-            # Iterate through each day in the range
-            current_date = start_date
-            while current_date <= end_date:
-                date_str = current_date.strftime("%Y-%m-%d")
-                
-                # Get calls for this day
-                url = "https://us-5738.api.gong.io/v2/calls"
-                from_datetime = f"{date_str}T00:00:00Z"
-                to_datetime = f"{date_str}T23:59:59Z"
-                
-                params = {
-                    "fromDateTime": from_datetime,
-                    "toDateTime": to_datetime
-                }
-                
-                response = requests.get(
-                    url, 
-                    auth=(self.access_key, self.client_secret), 
-                    params=params
-                )
-                
-                if not response.ok:
-                    current_date += timedelta(days=1)
-                    continue
-                    
-                calls = response.json().get("calls", [])
+            # Get speaker data using the new method
+            speaker_data = self.populate_speaker_data(company_name, start_date, end_date)
 
-                # Loop through all the calls and match the title
-                matching_calls = []
-                for call in calls:
-                    title = call.get("title", "").lower()
-                    
-                    if company_name.lower() in title:
-                        matching_calls.append(call)
-                        print(Fore.MAGENTA + f"[MATCH] {date_str}: Comparing '{company_name.lower()}' with '{title}'" + Style.RESET_ALL)
-
-                # sort the matching calls by date
-                matching_calls.sort(key=lambda x: x.get("startTime", ""))
-
-                # Process each matching call (latest 10 calls)
-                for call in matching_calls[:10]:
-                    call_id = call.get("id")
-                    
-                    # Get extensive call data for speaker information
-                    extensive_url = "https://us-5738.api.gong.io/v2/calls/extensive"
-                    headers = {'Content-Type': 'application/json'}
-                    extensive_payload = {
-                        "filter": {
-                            "callIds": [str(call_id)]
-                        },
-                        "contentSelector": {
-                            "exposedFields": {
-                                "parties": True,
-                                "interaction": {
-                                    "speakers": True
-                                }
-                            }
-                        }
-                    }
-                    
-                    extensive_response = requests.post(
-                        extensive_url,
-                        auth=(self.access_key, self.client_secret),
-                        headers=headers,
-                        json=extensive_payload
-                    )
-                    
-                    if not extensive_response.ok:
-                        print(Fore.RED + f"Error fetching extensive data: {extensive_response.status_code}" + Style.RESET_ALL)
-                        print(Fore.RED + f"Response body: {extensive_response.text}" + Style.RESET_ALL)
-                        continue
-                    
-                    speaker_info = {}
-                    extensive_data = extensive_response.json()
-                    calls_data = extensive_data.get("calls", [])
-                    
-                    
-                    for call_data in calls_data:
-                        # Extract party information (speakers)
-                        parties = call_data.get("parties", [])
-                        
-                        for party in parties:
-                            speaker_id = party.get("speakerId")
-                            if speaker_id:
-                                speaker_info[speaker_id] = {
-                                    "name": party.get("name", "Unknown"),
-                                    "email": party.get("emailAddress", ""),
-                                    "affiliation": party.get("affiliation", "Unknown")
-                                }
-                    
-                    # Get transcript for this call
-                    transcript_url = 'https://us-5738.api.gong.io/v2/calls/transcript'
-                    transcript_payload = {
-                        "filter": {
-                            "fromDateTime": from_datetime,
-                            "toDateTime": to_datetime,
-                            "callIds": [str(call_id)]
-                        }
-                    }
-
-                    transcript_response = requests.post(
-                        transcript_url, 
-                        auth=(self.access_key, self.client_secret), 
-                        headers=headers, 
-                        json=transcript_payload
-                    )
-                    
-                    if not transcript_response.ok:
-                        print(Fore.RED + f"Error fetching transcript: {transcript_response.status_code}" + Style.RESET_ALL)
-                        print(Fore.RED + f"Response body: {transcript_response.text}" + Style.RESET_ALL)
-                        continue
-                        
-                    transcript_data = transcript_response.json()
-                    
-                    # Process all transcripts
-                    if "callTranscripts" in transcript_data:
-                        for transcript in transcript_data["callTranscripts"]:
-                            for part in transcript.get("transcript", []):
-                                speaker_id = part.get("speakerId", "unknown")
-                                
-                                # Get speaker details from our mapping
-                                details = speaker_info.get(speaker_id, {})
-                                speaker_name = details.get("name", "Unknown Speaker")
-                                speaker_email = details.get("email", "")
-                                speaker_affiliation = details.get("affiliation", "Unknown")
-                                
-                                # Create a unique key for this speaker
-                                unique_key = f"{speaker_id}"
-                                
-                                # Initialize this speaker if not already in the dictionary
-                                if unique_key not in speaker_data:
-                                    speaker_data[unique_key] = {
-                                        "speakerId": speaker_id,
-                                        "speakerName": speaker_name,
-                                        "email": speaker_email,
-                                        "affiliation": speaker_affiliation,
-                                        "full_transcript": ""
-                                    }
-                                
-                                # Extract and concatenate all sentences from this speaker
-                                if "sentences" in part:
-                                    for sentence in part["sentences"]:
-                                        speaker_data[unique_key]["full_transcript"] += sentence.get("text", "") + " "
-                
-                current_date += timedelta(days=1)
-            
-            speaker_transcripts = list(speaker_data.values())
+            # Convert speaker objects to dictionaries for compatibility
+            speaker_transcripts = [speaker.to_dict() for speaker in speaker_data.values()]
 
             print(Fore.MAGENTA + f"\nTotal speakers found: {len(speaker_transcripts)} = [{', '.join([speaker['speakerName'] for speaker in speaker_transcripts])}]" + Style.RESET_ALL)
-
-            champion_prompt = """
-                You are a smart Sales Operations Analyst that analyzes Sales calls.
-                You are given a transcript of what a potential buyer of Galileo said.
-                Your job is to identify the champion of the call.
-                DEFINITION OF CHAMPION:
-                A champion is defined as someone who really loves the product and shows strong intent towards using or buying it. In this case the product is Galileo. Only assign champion as True if someone has sung high praises of the product or has exclaimed a desire to use or buy Galileo.
-                For the explanation, be specific to this peron's thoughts, comments or feelings (whether they are positive or negative).
-
-                Analyze the transcript and strictly return a JSON with the following fields:
-                - champion: true or false (use lowercase, JSON boolean values)
-                - explanation: A one-line explanation on why this person is a champion (or not a champion)
-
-                GUIDELINES:
-                1. Base your analysis solely on the evidence in the transcript
-                2. Include specific quotes or paraphrases that justify your conclusion
-                3. Focus on actions and statements that indicate buying influence, not just positive comments
-                4. Consider both explicit statements and implicit indicators of championship
-                
-                Transcript:
-                {transcript}
-
-                STRICTLY return the JSON, nothing else. Use proper JSON boolean values (true/false, not True/False).
-            """
 
             llm_responses = []
             for speaker_transcript in speaker_transcripts[:20]:
@@ -495,16 +500,16 @@ class GongService:
                     transcript = speaker_transcript["full_transcript"]
                     
                     try:
-                        llm_response_champions = ask_anthropic(
+                        speaker_response = ask_anthropic(
                             user_content=champion_prompt.format(transcript=transcript),
                             system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
                         ).replace('```json', '').replace('```', '').replace('\n', '').replace('True', 'true').replace('False', 'false').strip()
-                        llm_response_champions = json.loads(llm_response_champions)
-                        llm_response_champions["email"] = speaker_transcript["email"]
-                        llm_responses.append(llm_response_champions)
+                        speaker_response = json.loads(speaker_response)
+                        speaker_response["email"] = speaker_transcript["email"]
+                        llm_responses.append(speaker_response)
                     except json.JSONDecodeError as e:
                         print(Fore.RED + f"Error parsing LLM response: {e}" + Style.RESET_ALL)
-                        print(Fore.RED + f"Raw response: {llm_response_champions}" + Style.RESET_ALL)
+                        print(Fore.RED + f"Raw response: {speaker_response}" + Style.RESET_ALL)
                         continue
 
             print(Fore.MAGENTA + f"\nFinal results: {len(llm_responses)} speakers analyzed" + Style.RESET_ALL)
@@ -520,7 +525,7 @@ class GongService:
             import traceback
             traceback.print_exc()
             return []
-            
+
     def clear_champion_cache(self):
         """Clears the champion cache"""
         self.champion_cache.clear()
@@ -536,9 +541,14 @@ class GongService:
         """Returns a list of deal names currently in the cache"""
         return self.champion_cache.keys()
 
-# if __name__ == "__main__":
-#     gong_service = GongService()
-#     result = gong_service.get_speaker_transcripts("Intro: Cascade <> Galileo", 10)
-#     print(Fore.YELLOW + "*"*100 + Style.RESET_ALL)
-#     print(Fore.GREEN + f"Result: {result}" + Style.RESET_ALL)
-#     print(Fore.YELLOW + "*"*100 + Style.RESET_ALL)
+if __name__ == "__main__":
+
+    gong_service = GongService()
+
+    date_str = "2025-03-19"
+    call_title = "Intro: Cascade <> Galileo"
+
+    result = gong_service.get_speaker_champion_results(call_title, datetime.strptime(date_str, "%Y-%m-%d"))
+    print(Fore.YELLOW + "*"*100 + Style.RESET_ALL)
+    print(Fore.GREEN + f"Result: {result}" + Style.RESET_ALL)
+    print(Fore.YELLOW + "*"*100 + Style.RESET_ALL)
