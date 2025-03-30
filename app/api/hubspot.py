@@ -24,6 +24,7 @@ init()
 router = APIRouter()
 hubspot_service = HubspotService()
 session_service = SessionService()
+gong_service = GongService()  # Create a global instance
 
 # Store ongoing requests by browser ID
 ongoing_requests = {}
@@ -312,6 +313,8 @@ class ChampionResponse(BaseModel):
     champion: bool
     explanation: str
     email: str
+    speakerName: str
+    business_pain: Optional[str] = None  # Add this field as optional
 
 class ContactsAndChampionResponse(BaseModel):
     contacts: List[ChampionResponse]
@@ -322,8 +325,6 @@ def process_champion_request_sync(browser_id: str, deal_name: str, target_date: 
     """Process the champion request in the background (synchronous version)"""
     try:
         print(Fore.BLUE + f"Starting champion request processing for {deal_name}" + Style.RESET_ALL)
-        # Instantiate GongService directly
-        gong_service = GongService()
         
         # measure the time it takes to process
         start_time = time.time()
@@ -336,8 +337,8 @@ def process_champion_request_sync(browser_id: str, deal_name: str, target_date: 
         # Count champions
         champions_count = sum(1 for result in speaker_champion_results if result.get('champion', False))
         
-        # Create a composite cache key
-        cache_key = f"{browser_id}_{deal_name}"
+        # Create a composite cache key without browser_id
+        cache_key = f"{deal_name}_{target_date.strftime('%Y-%m-%d')}"
         
         # Store the results
         result = {
@@ -346,21 +347,15 @@ def process_champion_request_sync(browser_id: str, deal_name: str, target_date: 
             "champions_count": champions_count
         }
         
-        ongoing_requests[cache_key] = {
-            "status": "completed",
-            "result": result
-        }
+        print(Fore.BLUE + f"Writing result to cache: {cache_key}" + Style.RESET_ALL)
+        gong_service.champion_cache.put(cache_key, result)
         print(Fore.BLUE + f"Successfully processed champion request for {deal_name}" + Style.RESET_ALL)
+        return result  # Return the result directly
     except Exception as e:
         print(Fore.RED + f"Error in process_champion_request_sync: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
-        # Use composite cache key here too
-        cache_key = f"{browser_id}_{deal_name}"
-        ongoing_requests[cache_key] = {
-            "status": "error",
-            "error": str(e)
-        }
+        raise  # Re-raise the exception
 
 @router.get("/contacts-and-champion", response_model=ContactsAndChampionResponse)
 async def get_contacts_and_champion(
@@ -382,47 +377,44 @@ async def get_contacts_and_champion(
         if not browser_id:
             raise HTTPException(status_code=400, detail="Browser ID is required")
 
-        # Create composite cache key
-        cache_key = f"{browser_id}_{dealName}"
-        print(Fore.BLUE + f"Processing request for browser: {browser_id}, deal: {dealName}" + Style.RESET_ALL)
+        # Create composite cache key without browser_id
+        cache_key = f"{dealName}_{date}"
+        print(Fore.BLUE + f"Processing request for deal: {dealName}(client/browser: {browser_id})" + Style.RESET_ALL)
 
-        # Check if there's an ongoing request for this browser and deal
-        if cache_key in ongoing_requests:
-            ongoing_request = ongoing_requests[cache_key]
-            if ongoing_request["status"] == "processing":
-                # Cancel the previous request and start a new one
-                print(Fore.YELLOW + f"Cancelling previous request for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
-                ongoing_request["status"] = "cancelled"
-                # Wait a bit for the previous request to clean up
-                await asyncio.sleep(1)
-            elif ongoing_request["status"] == "completed":
-                # Validate the cached result has the required structure
-                result = ongoing_request.get("result", {})
-                
-                if (result and 
-                    "contacts" in result and 
-                    "total_contacts" in result and 
-                    "champions_count" in result):
-                    print(Fore.BLUE + f"Returning valid cached result for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
-                    return result
-                else:
-                    print(Fore.YELLOW + f"Invalid or empty cached result for browser {browser_id}, deal {dealName}, reprocessing..." + Style.RESET_ALL)
-                    del ongoing_requests[cache_key]
-            elif ongoing_request["status"] == "error":
-                # Clear the error state and start fresh
-                print(Fore.YELLOW + f"Clearing error state for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
-                del ongoing_requests[cache_key]
+        # First check if we have the result in cache
+        cached_result = gong_service.champion_cache.get(cache_key)
+        
+        if cached_result:
+            print(Fore.BLUE + f"Found cached result for {cache_key}" + Style.RESET_ALL)
+            # Ensure cached result matches expected structure
+            if isinstance(cached_result, list):
+                # If cached result is just a list of contacts, convert it to proper structure
+                cached_result = {
+                    "contacts": cached_result,
+                    "total_contacts": len(cached_result),
+                    "champions_count": sum(1 for contact in cached_result if contact.get('champion', False))
+                }
+            elif not isinstance(cached_result, dict):
+                print(Fore.RED + f"Invalid cached result type: {type(cached_result)}" + Style.RESET_ALL)
+                cached_result = None
+            
+            if cached_result and all(key in cached_result for key in ["contacts", "total_contacts", "champions_count"]):
+                print(Fore.BLUE + f"Returning cached result for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                return cached_result
+            else:
+                print(Fore.RED + f"Invalid cached result structure" + Style.RESET_ALL)
+                cached_result = None
 
-        # Mark this request as processing
-        ongoing_requests[cache_key] = {
-            "status": "processing",
-            "start_time": datetime.now()
-        }
+        if not cached_result:
+            print(Fore.RED + f"Missing or invalid cache entry for key: {cache_key}" + Style.RESET_ALL)
+            print(Fore.RED + "Current cache keys:" + Style.RESET_ALL)
+            for key in gong_service.champion_cache.keys():
+                print(Fore.RED + f"Key: {key}" + Style.RESET_ALL)
 
-        # Start the background task using thread pool
+        # If no valid cached result, start the background task
         print(Fore.BLUE + f"Creating background task for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
         
-        # Submit the task to the thread pool
+        # Submit the task to the thread pool and wait for it to complete
         future = thread_pool.submit(
             process_champion_request_sync,
             browser_id,
@@ -430,72 +422,31 @@ async def get_contacts_and_champion(
             target_date
         )
         
-        # Add a callback to handle task completion
-        def done_callback(future):
-            try:
-                future.result()  # This will raise any exceptions that occurred
-            except Exception as e:
-                print(Fore.RED + f"Background task failed: {str(e)}" + Style.RESET_ALL)
-                if cache_key in ongoing_requests:
-                    ongoing_requests[cache_key]["status"] = "error"
-                    ongoing_requests[cache_key]["error"] = str(e)
-        
-        future.add_done_callback(done_callback)
-        print(Fore.BLUE + f"Background task submitted for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
-
-        # Wait for the result with a timeout
-        start_time = time.time()
-        timeout = 120  # 2 minutes timeout
-        check_interval = 0.5  # Check every 0.5 seconds
-        
-        while True:
-            if cache_key in ongoing_requests:
-                request_data = ongoing_requests[cache_key]
-                if request_data["status"] == "completed":
-                    # Validate the result before returning
-                    result = request_data.get("result", {})
-                    print(Fore.CYAN + f"Validating result structure:" + Style.RESET_ALL)
-                    print(f"Result: {result}")
-                    print(f"Has contacts: {'contacts' in result}")
-                    print(f"Has total_contacts: {'total_contacts' in result}")
-                    print(f"Has champions_count: {'champions_count' in result}")
-                    print(f"Contacts length: {len(result.get('contacts', []))}")
-                    
-                    if (result and 
-                        "contacts" in result and 
-                        "total_contacts" in result and 
-                        "champions_count" in result):
-                        print(Fore.BLUE + f"Request completed successfully for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
-                        return result
-                    else:
-                        print(Fore.RED + f"Invalid result structure for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
-                        request_data["status"] = "error"
-                        request_data["error"] = "Invalid result structure"
-                elif request_data["status"] == "error":
-                    error_msg = request_data.get("error", "Unknown error")
-                    print(Fore.RED + f"Request failed for browser {browser_id}, deal {dealName}: {error_msg}" + Style.RESET_ALL)
-                    raise HTTPException(status_code=500, detail=error_msg)
-                elif request_data["status"] == "cancelled":
-                    print(Fore.YELLOW + f"Request was cancelled for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
-                    raise HTTPException(status_code=409, detail="Request was cancelled by a new request")
+        try:
+            # Wait for the task to complete with a timeout
+            result = future.result(timeout=120)  # 2 minutes timeout
+            print(Fore.BLUE + f"Background task completed successfully for {dealName}" + Style.RESET_ALL)
             
-            # Check for timeout
-            if time.time() - start_time > timeout:
-                print(Fore.RED + f"Request timed out after {timeout} seconds for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
-                # Clean up the request
-                if cache_key in ongoing_requests:
-                    del ongoing_requests[cache_key]
-                raise HTTPException(
-                    status_code=504, 
-                    detail=f"Request timed out after {timeout} seconds. The operation is still processing in the background."
-                )
-            
-            # Log progress every 10 seconds
-            elapsed = time.time() - start_time
-            if elapsed % 10 < check_interval:
-                print(Fore.BLUE + f"Request still processing for browser {browser_id}, deal {dealName}... {int(elapsed)}s elapsed" + Style.RESET_ALL)
-            
-            await asyncio.sleep(check_interval)
+            # Validate the result structure
+            if (result and 
+                "contacts" in result and 
+                "total_contacts" in result and 
+                "champions_count" in result):
+                print(Fore.BLUE + f"Request completed successfully for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                return result
+            else:
+                print(Fore.RED + f"Invalid result structure for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                raise HTTPException(status_code=500, detail="Invalid result structure")
+                
+        except TimeoutError:
+            print(Fore.RED + f"Request timed out after 120 seconds for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+            raise HTTPException(
+                status_code=504, 
+                detail="Request timed out after 120 seconds. The operation is still processing in the background."
+            )
+        except Exception as e:
+            print(Fore.RED + f"Background task failed: {str(e)}" + Style.RESET_ALL)
+            raise HTTPException(status_code=500, detail=f"Background task failed: {str(e)}")
 
     except HTTPException:
         # Re-raise HTTP exceptions
@@ -504,9 +455,6 @@ async def get_contacts_and_champion(
         print(Fore.RED + f"Unexpected error in contacts-and-champion endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
-        # Clean up the request if it exists
-        if cache_key in ongoing_requests:
-            del ongoing_requests[cache_key]
         raise HTTPException(status_code=500, detail=f"Error identifying contacts and champion: {str(e)}")
 
 def parse_date(timestamp):
@@ -528,4 +476,73 @@ def parse_date(timestamp):
         return datetime.fromtimestamp(int(timestamp) / 1000)
     except (ValueError, TypeError):
         return None
+
+@router.delete("/browser-cache/{browser_id}")
+async def delete_browser_cache(
+    browser_id: str,
+    request: Request
+):
+    """Delete all cache entries associated with a browser ID"""
+    try:
+        print(Fore.BLUE + f"Deleting all cache entries for browser: {browser_id}" + Style.RESET_ALL)
+        
+        # Get browser ID from request headers to verify it matches
+        request_browser_id = request.headers.get("X-Browser-ID")
+        if not request_browser_id or request_browser_id != browser_id:
+            raise HTTPException(status_code=403, detail="Browser ID mismatch")
+        
+        # Find and remove all cache entries for this browser
+        keys_to_remove = [key for key in ongoing_requests.keys() if key.startswith(f"{browser_id}_")]
+        for key in keys_to_remove:
+            del ongoing_requests[key]
+            print(Fore.MAGENTA + f"Removed cache entry: {key}" + Style.RESET_ALL)
+        
+        return {
+            "message": f"Successfully deleted {len(keys_to_remove)} cache entries for browser {browser_id}",
+            "deleted_entries": keys_to_remove
+        }
+    except Exception as e:
+        print(Fore.RED + f"Error deleting browser cache: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error deleting browser cache: {str(e)}")
+
+@router.delete("/clear-all-cache/{browser_id}")
+async def clear_all_cache(
+    browser_id: str,
+    request: Request
+):
+    """Delete all cache entries associated with a browser ID and clear the champion data cache"""
+    try:
+        print(Fore.BLUE + f"Clearing all caches for browser: {browser_id}" + Style.RESET_ALL)
+        
+        # Get browser ID from request headers to verify it matches
+        request_browser_id = request.headers.get("X-Browser-ID")
+        if not request_browser_id or request_browser_id != browser_id:
+            raise HTTPException(status_code=403, detail="Browser ID mismatch")
+        
+        # 1. Clear ongoing requests cache
+        keys_to_remove = [key for key in ongoing_requests.keys() if key.startswith(f"{browser_id}_")]
+        for key in keys_to_remove:
+            del ongoing_requests[key]
+            print(Fore.MAGENTA + f"Removed ongoing request entry: {key}" + Style.RESET_ALL)
+        
+        # 2. Clear champion data cache entries for this browser
+        gong_service = GongService()
+        champion_cache_keys = gong_service.champion_cache.keys()
+        champion_keys_to_remove = [key for key in champion_cache_keys if key.startswith(f"{browser_id}_")]
+        for key in champion_keys_to_remove:
+            gong_service.champion_cache.remove(key)
+            print(Fore.MAGENTA + f"Removed champion cache entry: {key}" + Style.RESET_ALL)
+        
+        return {
+            "message": f"Successfully cleared all caches for browser {browser_id}",
+            "deleted_ongoing_entries": keys_to_remove,
+            "deleted_champion_entries": champion_keys_to_remove
+        }
+    except Exception as e:
+        print(Fore.RED + f"Error clearing caches: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error clearing caches: {str(e)}")
 

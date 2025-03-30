@@ -346,13 +346,16 @@ class GongService:
 
             # Loop through all the calls and match the title
             matching_calls = []
+            matches = 0
             for call in calls:
                 title = call.get("title", "").lower()
                 
                 if company_name.lower() in title:
                     matching_calls.append(call)
+                    matches += 1
                     print(Fore.MAGENTA + f"[MATCH] {date_str}: Comparing '{company_name.lower()}' with '{title}'" + Style.RESET_ALL)
 
+            print(Fore.MAGENTA + f"{matches} matching calls found." + Style.RESET_ALL)
             # sort the matching calls by date
             matching_calls.sort(key=lambda x: x.get("startTime", ""))
 
@@ -460,32 +463,28 @@ class GongService:
         
         return speaker_data
 
-    def get_speaker_champion_results(self, call_title, target_date=None):
+    def get_speaker_champion_results(self, call_title, target_date=None) -> List[Dict]:
         try:
             company_name = self.extract_company_name(call_title)
             if company_name == "Unknown Company":
                 return []
 
             # Check if we have cached results for this deal
-            cache_key = company_name.lower()
-            cached_result = self.champion_cache.get(cache_key)
-            if cached_result:
-                print(Fore.MAGENTA + f"Retrieved champion data for '{company_name}' from cache" + Style.RESET_ALL)
-                return cached_result
-
+            cache_key = f"{company_name.lower()}_{target_date.strftime('%Y-%m-%d')}"
             print(Fore.MAGENTA + f"Extracted company name: {company_name}" + Style.RESET_ALL)
 
             if target_date is None:
                 target_date = datetime.now()
             
             # Calculate date range
-            start_date = target_date
+            start_date = target_date + timedelta(days=-1)
             end_date = target_date + timedelta(days=self.reschedule_window)
-            
+
             print(Fore.MAGENTA + f"Searching for calls '{company_name}' around {target_date.strftime('%Y-%m-%d')} + {self.reschedule_window} days" + Style.RESET_ALL)
             
             # Get speaker data using the new method
             speaker_data = self.populate_speaker_data(company_name, start_date, end_date)
+            print(Fore.MAGENTA + f"{len(speaker_data)} speaker data retrieved." + Style.RESET_ALL)
 
             # Convert speaker objects to dictionaries for compatibility
             speaker_transcripts = [speaker.to_dict() for speaker in speaker_data.values()]
@@ -506,6 +505,7 @@ class GongService:
                         ).replace('```json', '').replace('```', '').replace('\n', '').replace('True', 'true').replace('False', 'false').strip()
                         speaker_response = json.loads(speaker_response)
                         speaker_response["email"] = speaker_transcript["email"]
+                        speaker_response["speakerName"] = speaker_transcript["speakerName"]
                         llm_responses.append(speaker_response)
                     except json.JSONDecodeError as e:
                         print(Fore.RED + f"Error parsing LLM response: {e}" + Style.RESET_ALL)
@@ -514,9 +514,9 @@ class GongService:
 
             print(Fore.MAGENTA + f"\nFinal results: {len(llm_responses)} speakers analyzed" + Style.RESET_ALL)
             
-            # Cache the results with the company name as the key
+            # Cache the results with the company name and date as the key
             self.champion_cache.put(cache_key, llm_responses)
-            print(Fore.MAGENTA + f"Cached champion data for '{company_name}'" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"Cached champion data for '{company_name}' for date {target_date.strftime('%Y-%m-%d')}" + Style.RESET_ALL)
             
             return llm_responses
             
@@ -541,14 +541,14 @@ class GongService:
         """Returns a list of deal names currently in the cache"""
         return self.champion_cache.keys()
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    gong_service = GongService()
+#     gong_service = GongService()
 
-    date_str = "2025-03-19"
-    call_title = "Intro: Cascade <> Galileo"
+#     date_str = "2025-03-19"
+#     call_title = "Intro: Cascade <> Galileo"
 
-    result = gong_service.get_speaker_champion_results(call_title, datetime.strptime(date_str, "%Y-%m-%d"))
-    print(Fore.YELLOW + "*"*100 + Style.RESET_ALL)
-    print(Fore.GREEN + f"Result: {result}" + Style.RESET_ALL)
-    print(Fore.YELLOW + "*"*100 + Style.RESET_ALL)
+#     result = gong_service.get_speaker_champion_results(call_title, datetime.strptime(date_str, "%Y-%m-%d"))
+#     print(Fore.YELLOW + "*"*100 + Style.RESET_ALL)
+#     print(Fore.GREEN + f"Result: {result}" + Style.RESET_ALL)
+#     print(Fore.YELLOW + "*"*100 + Style.RESET_ALL)
