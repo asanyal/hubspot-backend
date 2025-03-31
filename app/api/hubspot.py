@@ -41,7 +41,7 @@ async def health_check():
 async def get_pipeline_stages():
     """Get all pipeline stages from HubSpot"""
 
-    print(Fore.BLUE + "Fetching pipeline stages" + Style.RESET_ALL)
+    print(Fore.BLUE + "#### Fetching pipeline stages" + Style.RESET_ALL)
     try:
         stages = hubspot_service.get_pipeline_stages()
         return stages
@@ -52,7 +52,7 @@ async def get_pipeline_stages():
 async def get_deals_by_stage(stage: str = Query(..., description="The name of the pipeline stage")):
     """Get all deals in a specific pipeline stage"""
     try:
-        print(Fore.BLUE + f"API: Fetching deals for stage: '{stage}'" + Style.RESET_ALL)
+        print(Fore.BLUE + f"#### Fetching deals for stage: '{stage}'" + Style.RESET_ALL)
         deals = hubspot_service.get_deals_by_stage(stage)
         
         if not deals:
@@ -140,6 +140,7 @@ async def get_pipeline_summary():
 @router.get("/all-deals", response_model=List[Dict[str, Any]])
 async def get_all_deals():
     """Get a list of all deals for dropdown selection"""
+    print(Fore.BLUE + "#### Getting all deals" + Style.RESET_ALL)
     try:
         service = HubspotService()
         # measure the time it takes to get the all deals
@@ -172,9 +173,8 @@ async def get_deal_timeline(
     dealName: str = Query(..., description="The name of the deal")
 ):
     """Get timeline data for a specific deal"""
+    print(Fore.BLUE + f"#### Getting timeline for deal: {dealName}" + Style.RESET_ALL)
     try:
-        print(Fore.BLUE + f"API: Getting timeline for deal: {dealName}" + Style.RESET_ALL)
-        
         # Get browser ID from request headers
         browser_id = request.headers.get("X-Browser-ID")
         if not browser_id:
@@ -204,7 +204,7 @@ async def get_deal_timeline(
 
 @router.get("/deal-info", response_model=Dict[str, Any])
 async def get_deal_info(dealName: str = Query(..., description="The name of the deal")):
-    print(Fore.RED + "Getting deal info for deal: ", dealName + Style.RESET_ALL)
+    print(Fore.BLUE + f"#### Getting deal info for: {dealName}" + Style.RESET_ALL)
     try:
         service = HubspotService()
         deal_owner = "Unknown"
@@ -296,7 +296,7 @@ async def get_deal_info(dealName: str = Query(..., description="The name of the 
 @router.get("/deal-activities-count", response_model=Dict[str, int])
 async def get_deal_activities_count(dealName: str = Query(..., description="The name of the deal")):
     """Get the count of activities for a specific deal"""
-    print(Fore.BLUE + "Getting deal activities count for deal: ", dealName + Style.RESET_ALL)
+    print(Fore.BLUE + f"#### Getting deal activities count for: {dealName}" + Style.RESET_ALL)
     try:
         service = HubspotService()
         # measure the time it takes to get the deal activities count
@@ -324,11 +324,9 @@ class ContactsAndChampionResponse(BaseModel):
 def process_champion_request_sync(browser_id: str, deal_name: str, target_date: datetime):
     """Process the champion request in the background (synchronous version)"""
     try:
-        print(Fore.BLUE + f"Starting champion request processing for {deal_name}" + Style.RESET_ALL)
-        
+        print(Fore.BLUE + f"Calling get_speaker_champion_results for {deal_name}" + Style.RESET_ALL)
         # measure the time it takes to process
         start_time = time.time()
-        print(Fore.BLUE + f"Calling get_speaker_champion_results for {deal_name}" + Style.RESET_ALL)
         speaker_champion_results = gong_service.get_speaker_champion_results(deal_name, target_date=target_date)
         end_time = time.time()
         
@@ -347,7 +345,7 @@ def process_champion_request_sync(browser_id: str, deal_name: str, target_date: 
             "champions_count": champions_count
         }
         
-        print(Fore.BLUE + f"Writing result to cache: {cache_key}" + Style.RESET_ALL)
+        print(Fore.BLUE + f"[CACHE] Writing result to Champion cache: {cache_key}" + Style.RESET_ALL)
         gong_service.champion_cache.put(cache_key, result)
         print(Fore.BLUE + f"Successfully processed champion request for {deal_name}" + Style.RESET_ALL)
         return result  # Return the result directly
@@ -385,7 +383,7 @@ async def get_contacts_and_champion(
         cached_result = gong_service.champion_cache.get(cache_key)
         
         if cached_result:
-            print(Fore.BLUE + f"Found cached result for {cache_key}" + Style.RESET_ALL)
+            print(Fore.BLUE + f"[CACHE] Reading from Champion cache: {cache_key}" + Style.RESET_ALL)
             # Ensure cached result matches expected structure
             if isinstance(cached_result, list):
                 # If cached result is just a list of contacts, convert it to proper structure
@@ -395,21 +393,18 @@ async def get_contacts_and_champion(
                     "champions_count": sum(1 for contact in cached_result if contact.get('champion', False))
                 }
             elif not isinstance(cached_result, dict):
-                print(Fore.RED + f"Invalid cached result type: {type(cached_result)}" + Style.RESET_ALL)
+                print(Fore.RED + f"[CACHE] Invalid cached result type: {type(cached_result)}" + Style.RESET_ALL)
                 cached_result = None
             
             if cached_result and all(key in cached_result for key in ["contacts", "total_contacts", "champions_count"]):
-                print(Fore.BLUE + f"Returning cached result for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                print(Fore.BLUE + f"[CACHE] Returning cached result for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
                 return cached_result
             else:
-                print(Fore.RED + f"Invalid cached result structure" + Style.RESET_ALL)
+                print(Fore.RED + f"[CACHE] Invalid cached result structure" + Style.RESET_ALL)
                 cached_result = None
 
         if not cached_result:
-            print(Fore.RED + f"Missing or invalid cache entry for key: {cache_key}" + Style.RESET_ALL)
-            print(Fore.RED + "Current cache keys:" + Style.RESET_ALL)
-            for key in gong_service.champion_cache.keys():
-                print(Fore.RED + f"Key: {key}" + Style.RESET_ALL)
+            print(Fore.RED + f"[CACHE] Missing or invalid cache entry for key: {cache_key}" + Style.RESET_ALL)
 
         # If no valid cached result, start the background task
         print(Fore.BLUE + f"Creating background task for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
@@ -425,14 +420,14 @@ async def get_contacts_and_champion(
         try:
             # Wait for the task to complete with a timeout
             result = future.result(timeout=120)  # 2 minutes timeout
-            print(Fore.BLUE + f"Background task completed successfully for {dealName}" + Style.RESET_ALL)
+            print(Fore.BLUE + f"Background task completed for {dealName}" + Style.RESET_ALL)
             
             # Validate the result structure
             if (result and 
                 "contacts" in result and 
                 "total_contacts" in result and 
                 "champions_count" in result):
-                print(Fore.BLUE + f"Request completed successfully for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                print(Fore.BLUE + f"Request successfully completed for deal {dealName}" + Style.RESET_ALL)
                 return result
             else:
                 print(Fore.RED + f"Invalid result structure for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
@@ -484,7 +479,7 @@ async def delete_browser_cache(
 ):
     """Delete all cache entries associated with a browser ID"""
     try:
-        print(Fore.BLUE + f"Deleting all cache entries for browser: {browser_id}" + Style.RESET_ALL)
+        print(Fore.BLUE + f"[CACHE] Deleting all cache entries for browser: {browser_id}" + Style.RESET_ALL)
         
         # Get browser ID from request headers to verify it matches
         request_browser_id = request.headers.get("X-Browser-ID")
@@ -495,14 +490,14 @@ async def delete_browser_cache(
         keys_to_remove = [key for key in ongoing_requests.keys() if key.startswith(f"{browser_id}_")]
         for key in keys_to_remove:
             del ongoing_requests[key]
-            print(Fore.MAGENTA + f"Removed cache entry: {key}" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"[CACHE] Removed cache entry: {key}" + Style.RESET_ALL)
         
         return {
             "message": f"Successfully deleted {len(keys_to_remove)} cache entries for browser {browser_id}",
             "deleted_entries": keys_to_remove
         }
     except Exception as e:
-        print(Fore.RED + f"Error deleting browser cache: {str(e)}" + Style.RESET_ALL)
+        print(Fore.RED + f"[CACHE] Error deleting browser cache: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error deleting browser cache: {str(e)}")
@@ -514,7 +509,7 @@ async def clear_all_cache(
 ):
     """Delete all cache entries associated with a browser ID and clear the champion data cache"""
     try:
-        print(Fore.BLUE + f"Clearing all caches for browser: {browser_id}" + Style.RESET_ALL)
+        print(Fore.BLUE + f"[CACHE] Clearing all caches for browser: {browser_id}" + Style.RESET_ALL)
         
         # Get browser ID from request headers to verify it matches
         request_browser_id = request.headers.get("X-Browser-ID")
@@ -525,7 +520,7 @@ async def clear_all_cache(
         keys_to_remove = [key for key in ongoing_requests.keys() if key.startswith(f"{browser_id}_")]
         for key in keys_to_remove:
             del ongoing_requests[key]
-            print(Fore.MAGENTA + f"Removed ongoing request entry: {key}" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"[CACHE] Removed ongoing request entry: {key}" + Style.RESET_ALL)
         
         # 2. Clear champion data cache entries for this browser
         gong_service = GongService()
@@ -533,7 +528,7 @@ async def clear_all_cache(
         champion_keys_to_remove = [key for key in champion_cache_keys if key.startswith(f"{browser_id}_")]
         for key in champion_keys_to_remove:
             gong_service.champion_cache.remove(key)
-            print(Fore.MAGENTA + f"Removed champion cache entry: {key}" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"[CACHE] Removed champion cache entry: {key}" + Style.RESET_ALL)
         
         return {
             "message": f"Successfully cleared all caches for browser {browser_id}",
@@ -541,8 +536,7 @@ async def clear_all_cache(
             "deleted_champion_entries": champion_keys_to_remove
         }
     except Exception as e:
-        print(Fore.RED + f"Error clearing caches: {str(e)}" + Style.RESET_ALL)
+        print(Fore.RED + f"[CACHE] Error clearing caches: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error clearing caches: {str(e)}")
-

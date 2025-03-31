@@ -381,7 +381,7 @@ class HubspotService:
         if (self._deals_cache is not None and 
             self._deals_cache_timestamp is not None and 
             current_time - self._deals_cache_timestamp < self._deals_cache_ttl):
-            print(Fore.CYAN + f"[CACHE HIT] Returning cached deals data (age: {int(current_time - self._deals_cache_timestamp)}s)" + Style.RESET_ALL)
+            print(Fore.GREEN + f"[CACHE HIT] Returning cached deals data (age: {int(current_time - self._deals_cache_timestamp)}s)" + Style.RESET_ALL)
             return self._deals_cache
         else:
             if self._deals_cache is None:
