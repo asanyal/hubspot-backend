@@ -29,8 +29,10 @@ gong_service = GongService()  # Create a global instance
 # Store ongoing requests by browser ID
 ongoing_requests = {}
 
-# Add after other global variables
-thread_pool = ThreadPoolExecutor(max_workers=4)  # Limit concurrent background tasks
+# Thread pool for background tasks
+# Increased from 4 to 8 workers for better throughput
+# Formula: (2 * number_of_cores) is a common practice for optimal thread pool size
+thread_pool = ThreadPoolExecutor(max_workers=10)  # Increased concurrent background tasks
 
 @router.get("/health", status_code=200)
 async def health_check():

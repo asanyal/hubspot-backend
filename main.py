@@ -26,4 +26,15 @@ app.include_router(hubspot.router, prefix="/api/hubspot", tags=["hubspot"])
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        workers=8,  # Number of worker processes
+        loop="uvloop",  # Use uvloop for better performance
+        limit_concurrency=1000,  # Maximum number of connections
+        backlog=2048,  # Maximum number of pending connections
+        timeout_keep_alive=30,  # Keep-alive timeout
+        access_log=True
+    )

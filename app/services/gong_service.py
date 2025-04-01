@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from app.core.config import settings
 from app.services.llm_service import ask_anthropic
-from app.utils.prompts import champion_prompt
+from app.utils.prompts import champion_prompt, company_name_prompt
 
 import time
 
@@ -286,29 +286,8 @@ class GongService:
 
     def extract_company_name(self, call_title):
         """Extract company name from call title"""
-        prompt = f"""
-            Extract name of the company from this call title.
-            Call title: {call_title}
-            
-            Rules:
-            1. If the title contains " - New Deal", extract everything before it
-            2. If the title contains " <> ", extract everything before it
-            3. If the title contains " - ", extract everything before it
-            4. Exclude suffixes like "inc", "llc", "holdings", "group", "corp", "company", "corporation" etc. from the company name
-            5. For a healthcare company, exclude "health" or "healthcare" from the company name
-            6. Remove any leading/trailing whitespace
-            7. If you cannot find the company name, return "Unknown Company"
-            
-            Examples:
-            - "Notable - New Deal" -> "Notable"
-            - "Intro: Cascade <> Galileo" -> "Cascade"
-            - "Company Name - Some Text" -> "Company Name"
-            
-            Only return the name of the company.
-            Assume that Galileo is not a company name.
-        """
         response = ask_anthropic(
-            user_content=prompt,
+            user_content=company_name_prompt.format(call_title=call_title),
             system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
         )
         return response.strip()
