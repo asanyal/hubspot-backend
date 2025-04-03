@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from app.core.config import settings
 from app.services.llm_service import ask_anthropic
-from app.utils.prompts import champion_prompt, company_name_prompt
+from app.utils.prompts import champion_prompt, company_name_prompt, PARR_PRINCIPLE_PROMPT
 
 import time
 
@@ -476,7 +476,7 @@ class GongService:
                     print(Fore.MAGENTA + f"Analyzing {speaker_transcript['email']}..." + Style.RESET_ALL)
 
                     transcript = speaker_transcript["full_transcript"]
-                    
+
                     try:
                         speaker_response = ask_anthropic(
                             user_content=champion_prompt.format(transcript=transcript),
@@ -485,6 +485,15 @@ class GongService:
                         speaker_response = json.loads(speaker_response)
                         speaker_response["email"] = speaker_transcript["email"]
                         speaker_response["speakerName"] = speaker_transcript["speakerName"]
+
+                        parr_response = ask_anthropic(
+                            user_content=PARR_PRINCIPLE_PROMPT.format(speaker_name=speaker_transcript["speakerName"], transcript=transcript),
+                            system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
+                        ).replace('```json', '').replace('```', '').replace('\n', '').replace('True', 'true').replace('False', 'false').strip()
+                        parr_response = json.loads(parr_response)
+
+                        speaker_response["parr_analysis"] = parr_response
+
                         llm_responses.append(speaker_response)
                     except json.JSONDecodeError as e:
                         print(Fore.RED + f"Error parsing LLM response: {e}" + Style.RESET_ALL)

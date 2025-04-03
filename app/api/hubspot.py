@@ -317,6 +317,7 @@ class ChampionResponse(BaseModel):
     email: str
     speakerName: str
     business_pain: Optional[str] = None  # Add this field as optional
+    parr_analysis: Optional[Dict[str, Any]] = None  # Add parr_analysis field as optional
 
 class ContactsAndChampionResponse(BaseModel):
     contacts: List[ChampionResponse]

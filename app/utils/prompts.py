@@ -52,3 +52,95 @@ company_name_prompt = """
     Only return the name of the company.
     Assume that Galileo is not a company name.
 """
+
+
+PARR_PRINCIPLE_PROMPT = """
+    PAPR principle is a framework for analyzing the influence of people in a deal.
+    It stands for Pain, Authority, Preference, and Role.
+
+    Here's how it works:
+
+    Take every influencer involved in your deal.
+    Rank them on these aspects on a scale of 1-5:
+
+    ::::: PAIN :::::
+    How intense (or not) is their pain for what you solve?
+    Low? Medium? High?
+
+    ::::: AUTHORITY :::::
+    How much authority do they (or could they) have on this deal?
+    Low? Medium? High?
+
+
+    ::::: PREFERENCE :::::
+    How highly do they prefer your solution vs. someone else's?
+    Low? Medium? High?
+
+    ::::: ROLE :::::
+    How involved are they in this particular decision process?
+    Low? Medium? High?
+
+    Here's an example:
+
+    Let's say I have a director of sales involved in my deal. 
+
+    Here's how she stacks up:
+
+    PAIN: Very high.
+    AUTHORITY: High. She's not the DM, but her voice is respected.
+    PREFERENCE: Low. She prefers a competitor.
+    ROLE: High. Very involved in the decision process.
+
+    What's your move?
+    You can't ignore her.
+    Her authority is too high. 
+    You'll lose.
+    My move?
+    Find an internal coach.
+    Learn why she prefers the competitor.
+    If it's non emotional (i.e. she doesn't HATE us, but prefers the others for rational reasons) then I can overcome it myself, I'll meet with her head-on.
+    Turn a skeptic into a champion.
+    But if she HATES us for some reason?
+    My words may carry no influence.
+    So I'll enlist my champion to sell on my behalf.
+    Now. Here's where things get powerful:
+
+    Take the opposite example:
+
+    Let's say I have A DIFFERENT director of sales involved in my deal. 
+
+    Here's how he stacks up:
+
+    PAIN: Very high.
+    AUTHORITY: Low. Not respected. Coach says people don't like him.
+    PREFERENCE: Low. He prefers a competitor to pclub.io.
+    ROLE: Somewhat high. Involved in the decision process.
+
+    What's your move?
+    Polar opposite as before.
+
+    If I'm confident in my coach's inside knowledge on him carrying no influence?
+    I'm going to ignore him.
+
+    Box him out of the deal (I'm such a meanie I know).
+    The point of all of this?
+
+    The PAPR framework eliminate random acts of multi-threading.
+    You can see that based on how they rank, your actions will differ.
+    That's how you dramatically boost your win rates with multi-threading.
+
+    Rank this person on the PAPR criteria.
+
+    Return a JSON with the following fields:
+    - pain: 1-5
+    - authority: 1-5
+    - preference: 1-5
+    - role: 1-5
+    - parr_explanation: A one-line explanation of the analysis based on the PAPR framework
+
+    Speaker: {speaker_name}
+    Transcript:
+    {transcript}
+
+    STRICTLY return the JSON, nothing else.
+"""
