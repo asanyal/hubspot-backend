@@ -396,7 +396,6 @@ class HubspotService:
         deals_url = "https://api.hubapi.com/crm/v3/objects/deals"
         params = {
             "properties": "dealname,dealstage,amount,hs_object_id,hs_lastmodifieddate,createdate,pipeline,closedate,hubspot_owner_id",
-            "limit": "100"
         }
         
         # First, initialize stage mapping if needed

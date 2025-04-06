@@ -334,7 +334,7 @@ class GongService:
                     matches += 1
                     print(Fore.MAGENTA + f"[MATCH] {date_str}: Comparing '{company_name.lower()}' with '{title}'" + Style.RESET_ALL)
 
-            print(Fore.MAGENTA + f"{matches} matching calls found." + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"{matches} matching calls found on {date_str}" + Style.RESET_ALL)
             # sort the matching calls by date
             matching_calls.sort(key=lambda x: x.get("startTime", ""))
 
