@@ -318,6 +318,7 @@ class GongService:
             )
             
             if not response.ok:
+                print(Fore.RED + f"Error fetching calls: {response.status_code}" + Style.RESET_ALL)
                 current_date += timedelta(days=1)
                 continue
                 

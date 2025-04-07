@@ -43,6 +43,8 @@ company_name_prompt = """
 
     For the following companies, return their short form:
     - "American Express" -> "Amex"
+    - "Deutsche Bank" -> "DB"
+    - "Deutsche Telekom" -> "DT"
     
     Examples:
     - "Notable - New Deal" -> "Notable"
