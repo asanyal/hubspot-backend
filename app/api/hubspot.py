@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 from app.services.hubspot_service import HubspotService
 from app.services.gong_service import GongService
 from app.services.session_service import SessionService
+from app.services.firecrawl_service import get_company_analysis
 from collections import Counter
 from datetime import datetime
 import requests
@@ -18,6 +19,8 @@ from pydantic import BaseModel
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, CancelledError
 import threading
+from fastapi.responses import StreamingResponse
+import json
 
 init()
 
@@ -543,3 +546,41 @@ async def clear_all_cache(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error clearing caches: {str(e)}")
+
+@router.get("/company-overview", response_model=Dict[str, str])
+async def get_company_overview(dealName: str = Query(..., description="The name of the deal")):
+    """Get company overview for a specific deal using Firecrawl"""
+    print(Fore.BLUE + f"#### Getting company overview for deal: {dealName}" + Style.RESET_ALL)
+    
+    # Create a simple in-memory cache if it doesn't exist
+    if not hasattr(get_company_overview, 'cache'):
+        get_company_overview.cache = {}
+    
+    try:
+        # Create a cache key based on the deal name
+        cache_key = f"company_overview_{dealName}"
+        
+        # Check if we have cached data for this deal
+        if cache_key in get_company_overview.cache:
+            cached_overview = get_company_overview.cache[cache_key]
+            print(Fore.GREEN + f"[CACHE HIT] Returning cached company overview for deal: {dealName}" + Style.RESET_ALL)
+            return {"overview": cached_overview}
+            
+        # No cache hit, call the company analysis function
+        print(Fore.YELLOW + f"[CACHE MISS] Generating new company overview for deal: {dealName}" + Style.RESET_ALL)
+        try:
+            company_info = get_company_analysis(dealName)
+            # Cache the result
+            get_company_overview.cache[cache_key] = company_info
+            print(Fore.GREEN + f"[CACHE UPDATE] Saved company overview to cache for deal: {dealName}" + Style.RESET_ALL)
+            return {"overview": company_info}
+        except Exception as scrape_error:
+            # Log the error but return a graceful response
+            print(Fore.RED + f"Error scraping company info: {str(scrape_error)}" + Style.RESET_ALL)
+            return {"overview": "No company info available"}
+    except Exception as e:
+        print(Fore.RED + f"Error in company-overview endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        # Return a graceful response instead of raising an error
+        return {"overview": "No company info available"}

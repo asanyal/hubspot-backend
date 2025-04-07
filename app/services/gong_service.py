@@ -14,6 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from app.core.config import settings
 from app.services.llm_service import ask_anthropic
 from app.utils.prompts import champion_prompt, company_name_prompt, PARR_PRINCIPLE_PROMPT
+from app.utils.general_utils import extract_company_name
 
 import time
 
@@ -284,14 +285,6 @@ class GongService:
                 "explanation": f"Error analyzing call: {str(e)}"
             }
 
-    def extract_company_name(self, call_title):
-        """Extract company name from call title"""
-        response = ask_anthropic(
-            user_content=company_name_prompt.format(call_title=call_title),
-            system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
-        )
-        return response.strip()
-
     def populate_speaker_data(self, company_name: str, start_date: datetime, end_date: datetime) -> Dict[str, Speaker]:
         """Populate speaker data from Gong API calls within the given date range."""
         speaker_data: Dict[str, Speaker] = {}
@@ -329,8 +322,11 @@ class GongService:
             matches = 0
             for call in calls:
                 title = call.get("title", "").lower()
-                
-                if company_name.lower() in title:
+
+                company_name_tokens = company_name.lower().split(" ")
+                title_tokens = title.lower().split(" ")
+
+                if any(token in title_tokens for token in company_name_tokens):
                     matching_calls.append(call)
                     matches += 1
                     print(Fore.MAGENTA + f"[MATCH] {date_str}: Comparing '{company_name.lower()}' with '{title}'" + Style.RESET_ALL)
@@ -445,7 +441,7 @@ class GongService:
 
     def get_speaker_champion_results(self, call_title, target_date=None) -> List[Dict]:
         try:
-            company_name = self.extract_company_name(call_title)
+            company_name = extract_company_name(call_title)
             if company_name == "Unknown Company":
                 return []
 
@@ -522,7 +518,7 @@ class GongService:
         
     def remove_from_champion_cache(self, deal_name):
         """Removes a specific deal from the champion cache"""
-        key = self.extract_company_name(deal_name).lower()
+        key = extract_company_name(deal_name).lower()
         self.champion_cache.remove(key)
         print(Fore.MAGENTA + f"Removed '{key}' from champion cache" + Style.RESET_ALL)
         

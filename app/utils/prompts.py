@@ -39,19 +39,23 @@ company_name_prompt = """
     4. Exclude suffixes like "inc", "llc", "holdings", "technologies", "group", "corp", "company", "corporation" etc. from the company name
     5. For a healthcare company, exclude "health" or "healthcare" from the company name
     6. Remove any leading/trailing whitespace
-    7. If you cannot find the company name, return "Unknown Company"
+    7. Return multiple possible variants of the company name, if applicable, such as abbreviations or common short forms (separated by spaces)
+    8. If you cannot find the company name, return "Unknown Company"
 
     For the following companies, return their short form:
     - "American Express" -> "Amex"
     - "Deutsche Bank" -> "DB"
     - "Deutsche Telekom" -> "DT"
+    - "FreshWorks" -> "FW"
     
     Examples:
     - "Notable - New Deal" -> "Notable"
     - "Intro: Cascade <> Galileo" -> "Cascade"
+    - "Washington Post - New Deal" -> "Washington Post WashPost WaPo"
+    - "General Dynamics Land Systems - New Deal" -> "General Dynamics Land Systems GDLS"
     - "Company Name - Some Text" -> "Company Name"
     
-    Only return the name of the company.
+    Only return the name(s) of the company in a format that could include the full name, abbreviation, or any widely recognized short form.
     Assume that Galileo is not a company name.
 """
 
@@ -146,3 +150,5 @@ PARR_PRINCIPLE_PROMPT = """
 
     STRICTLY return the JSON, nothing else.
 """
+
+
