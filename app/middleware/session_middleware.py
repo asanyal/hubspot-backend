@@ -11,8 +11,16 @@ class SessionMiddleware(BaseHTTPMiddleware):
         self.session_service = SessionService()
 
     async def dispatch(self, request: Request, call_next):
-        # Skip session validation for health check endpoint
-        if request.url.path == "/api/hubspot/health":
+        # Debug print the path
+        print(Fore.BLUE + f"Request path: {request.url.path}" + Style.RESET_ALL)
+        
+        # Skip session validation for health check and transcript endpoints
+        if any(request.url.path.endswith(path) for path in [
+            "/health",
+            "/load-customer-transcripts",
+            "/ask-customer"
+        ]):
+            print(Fore.GREEN + f"Skipping session validation for {request.url.path}" + Style.RESET_ALL)
             return await call_next(request)
 
         # Get browser ID from request headers

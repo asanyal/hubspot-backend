@@ -5,12 +5,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings(BaseModel):
+    # API Keys
     HUBSPOT_API_KEY: str = os.getenv("HUBSPOT_API_KEY")
     GONG_ACCESS_KEY: str = os.getenv("GONG_ACCESS_KEY")
     GONG_CLIENT_SECRET: str = os.getenv("GONG_CLIENT_SECRET")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    
+    # HubSpot URLs
     CONTACTS_URL: str = "https://api.hubapi.com/crm/v3/objects/contacts"
     DEALS_URL: str = "https://api.hubapi.com/crm/v3/objects/deals"
     PIPELINE_DEALS_URL: str = "https://api.hubapi.com/crm/v3/pipelines/deals"
     OWNERS_URL: str = "https://api.hubapi.com/crm/v3/owners"
+    
+    # Redis Configuration
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+
+    # Transcript Cache Configuration
+    TRANSCRIPT_CACHE_TTL: int = int(os.getenv("TRANSCRIPT_CACHE_TTL", "86400"))  # 24 hours in seconds
+    CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "600"))
+    TOP_K_CHUNKS: int = int(os.getenv("TOP_K_CHUNKS", "10"))
 
 settings = Settings()

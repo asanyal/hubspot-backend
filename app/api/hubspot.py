@@ -4,8 +4,10 @@ from app.services.hubspot_service import HubspotService
 from app.services.gong_service import GongService
 from app.services.session_service import SessionService
 from app.services.firecrawl_service import get_company_analysis
+from app.utils.general_utils import extract_company_name
+from app.services.llm_service import ask_anthropic
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -21,6 +23,15 @@ from concurrent.futures import ThreadPoolExecutor, CancelledError
 import threading
 from fastapi.responses import StreamingResponse
 import json
+from app.services.transcript_cache import TranscriptCache
+from app.utils.transcript_utils import (
+    month_to_datetime,
+    get_month_range,
+    chunk_transcript,
+    find_similar_chunks
+)
+from app.services.openai_service import get_embeddings
+import numpy as np
 
 init()
 
@@ -36,6 +47,9 @@ ongoing_requests = {}
 # Increased from 4 to 8 workers for better throughput
 # Formula: (2 * number_of_cores) is a common practice for optimal thread pool size
 thread_pool = ThreadPoolExecutor(max_workers=10)  # Increased concurrent background tasks
+
+# Initialize transcript cache
+transcript_cache = TranscriptCache()
 
 @router.get("/health", status_code=200)
 async def health_check():
@@ -584,3 +598,154 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         traceback.print_exc()
         # Return a graceful response instead of raising an error
         return {"overview": "No company info available"}
+
+class QuestionRequest(BaseModel):
+    query: str
+
+@router.get("/load-customer-transcripts", response_model=Dict[str, Any])
+async def load_customer_transcripts(
+    dealName: str = Query(..., description="The name of the deal"),
+    startMonth: str = Query(..., description="Start month (short format, e.g. 'Jan')"),
+    endMonth: str = Query(..., description="End month (short format, e.g. 'Apr')")
+):
+    """Load customer transcripts for a given deal and month range into cache"""
+    try:
+        # Get company name from deal name
+        company_name = extract_company_name(dealName)
+        if company_name == "Unknown Company":
+            raise HTTPException(status_code=400, detail="Could not extract company name from deal name")
+
+        # Get month range
+        try:
+            months = get_month_range(startMonth, endMonth)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        # Track loading statistics
+        stats = {
+            "company_name": company_name,
+            "months_processed": [],
+            "total_chunks_loaded": 0,
+            "months_skipped": [],
+            "months_with_no_data": []
+        }
+
+        # Process each month
+        for month in months:
+            month_str = month.strftime("%b").lower()
+            
+            # Skip if already cached
+            if transcript_cache.has_data(company_name, month_str):
+                print(f"Data already cached for {company_name} in {month_str}")
+                stats["months_skipped"].append(month_str)
+                continue
+
+            # Get transcripts from Gong
+            start_date = month.strftime("%Y-%m-%d")
+            end_date = (month.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+            end_date = end_date.strftime("%Y-%m-%d")
+
+            # Get speaker data for the month
+            speaker_data = gong_service.populate_speaker_data(
+                company_name,
+                datetime.strptime(start_date, "%Y-%m-%d"),
+                datetime.strptime(end_date, "%Y-%m-%d")
+            )
+
+            # Combine all customer transcripts
+            customer_transcripts = []
+            for speaker in speaker_data.values():
+                if speaker.affiliation.lower() == "external":
+                    customer_transcripts.append(speaker.full_transcript)
+
+            if not customer_transcripts:
+                print(f"No customer transcripts found for {company_name} in {month_str}")
+                stats["months_with_no_data"].append(month_str)
+                continue
+
+            # Combine and chunk transcripts
+            combined_transcript = " ".join(customer_transcripts)
+            chunks = chunk_transcript(combined_transcript)
+
+            # Store chunks in cache
+            transcript_cache.store_chunks(company_name, month_str, chunks)
+            print(f"Stored {len(chunks)} chunks for {company_name} in {month_str}")
+            
+            stats["months_processed"].append(month_str)
+            stats["total_chunks_loaded"] += len(chunks)
+
+        return {
+            "status": "success",
+            "message": "Transcripts loaded successfully",
+            "stats": stats
+        }
+
+    except Exception as e:
+        print(f"Error loading transcripts: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error loading transcripts: {str(e)}")
+
+@router.post("/ask-customer")
+async def ask_customer(request: QuestionRequest):
+    """Ask a question about customer transcripts"""
+    try:
+        # Get company name from the query
+        company_name = extract_company_name(request.query)
+        if company_name == "Unknown Company":
+            raise HTTPException(status_code=400, detail="Could not identify company from query")
+
+        # Get all cached chunks for the company
+        all_chunks = []
+        for month in ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']:
+            chunks = transcript_cache.get_chunks(company_name, month)
+            if chunks:
+                all_chunks.extend(chunks)
+
+        if not all_chunks:
+            raise HTTPException(status_code=404, detail=f"No transcript data found for {company_name}")
+
+        # Generate embeddings for all chunks
+        chunk_embeddings = get_embeddings(all_chunks)
+        if chunk_embeddings is None or len(chunk_embeddings) == 0:
+            raise HTTPException(status_code=500, detail="Failed to generate embeddings")
+
+        # Generate embedding for the query
+        query_embeddings = get_embeddings([request.query])
+        if query_embeddings is None or len(query_embeddings) == 0:
+            raise HTTPException(status_code=500, detail="Failed to generate query embedding")
+
+        query_embedding = query_embeddings[0]
+
+        # Find similar chunks
+        similar_chunks = find_similar_chunks(
+            query_embedding,
+            chunk_embeddings,
+            all_chunks
+        )
+
+        # Construct context from similar chunks
+        context = "\n\n".join([chunk for chunk, _ in similar_chunks])
+
+        # Construct prompt for Anthropic
+        prompt = f"""
+            Given the following context from a customer conversation with Galileo and customer {company_name}.
+            Answer the question briefly (no more than 2 sentences) purely based on the context provided.
+            If the answer cannot be found in the context, say "I don't have enough information."
+
+            Question: {request.query}
+            Context: {context}
+        """
+
+        # Get answer from Anthropic
+        answer = ask_anthropic(
+            user_content=prompt,
+            system_content="You are a smart Sales Analyst that analyzes customer conversations. You work for Galileo."
+        )
+        return {"answer": answer}
+
+    except Exception as e:
+        print(f"Error answering question: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error answering question: {str(e)}")
