@@ -54,6 +54,9 @@ company_name_prompt = """
     - "Washington Post - New Deal" -> "Washington Post WashPost WaPo"
     - "General Dynamics Land Systems - New Deal" -> "General Dynamics Land Systems GDLS"
     - "Company Name - Some Text" -> "Company Name"
+
+    EXCEPTIONS:
+    - "ItsaCheckmate" -> "Checkmate"
     
     Only return the name(s) of the company in a format that could include the full name, abbreviation, or any widely recognized short form.
     Assume that Galileo is not a company name.

@@ -32,6 +32,7 @@ from app.utils.transcript_utils import (
 )
 from app.services.openai_service import get_embeddings
 import numpy as np
+from app.services.conversation_context import ConversationContextService
 
 init()
 
@@ -50,6 +51,9 @@ thread_pool = ThreadPoolExecutor(max_workers=10)  # Increased concurrent backgro
 
 # Initialize transcript cache
 transcript_cache = TranscriptCache()
+
+# Initialize the context service
+conversation_context = ConversationContextService()
 
 @router.get("/health", status_code=200)
 async def health_check():
@@ -568,11 +572,13 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
     
     # Create a simple in-memory cache if it doesn't exist
     if not hasattr(get_company_overview, 'cache'):
+        print(Fore.YELLOW + "Initializing company overview cache" + Style.RESET_ALL)
         get_company_overview.cache = {}
     
     try:
         # Create a cache key based on the deal name
         cache_key = f"company_overview_{dealName}"
+        print(Fore.BLUE + f"Cache key: {cache_key}" + Style.RESET_ALL)
         
         # Check if we have cached data for this deal
         if cache_key in get_company_overview.cache:
@@ -583,7 +589,10 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         # No cache hit, call the company analysis function
         print(Fore.YELLOW + f"[CACHE MISS] Generating new company overview for deal: {dealName}" + Style.RESET_ALL)
         try:
+            print(Fore.BLUE + "Calling get_company_analysis..." + Style.RESET_ALL)
             company_info = get_company_analysis(dealName)
+            print(Fore.GREEN + f"Successfully got company info: {company_info[:100]}..." + Style.RESET_ALL)
+            
             # Cache the result
             get_company_overview.cache[cache_key] = company_info
             print(Fore.GREEN + f"[CACHE UPDATE] Saved company overview to cache for deal: {dealName}" + Style.RESET_ALL)
@@ -591,6 +600,8 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         except Exception as scrape_error:
             # Log the error but return a graceful response
             print(Fore.RED + f"Error scraping company info: {str(scrape_error)}" + Style.RESET_ALL)
+            import traceback
+            traceback.print_exc()
             return {"overview": "No company info available"}
     except Exception as e:
         print(Fore.RED + f"Error in company-overview endpoint: {str(e)}" + Style.RESET_ALL)
@@ -604,52 +615,63 @@ class QuestionRequest(BaseModel):
 
 @router.get("/load-customer-transcripts", response_model=Dict[str, Any])
 async def load_customer_transcripts(
+    request: Request,
     dealName: str = Query(..., description="The name of the deal"),
-    startMonth: str = Query(..., description="Start month (short format, e.g. 'Jan')"),
-    endMonth: str = Query(..., description="End month (short format, e.g. 'Apr')")
+    startDate: str = Query(..., description="Start date in MM-DD-YYYY format"),
+    endDate: str = Query(..., description="End date in MM-DD-YYYY format")
 ):
-    """Load customer transcripts for a given deal and month range into cache"""
+    """Load customer transcripts for a given deal and date range into cache"""
     try:
+        # Get browser ID from request headers
+        browser_id = request.headers.get("X-Browser-ID")
+        if not browser_id:
+            raise HTTPException(status_code=400, detail="Browser ID is required")
+
         # Get company name from deal name
         company_name = extract_company_name(dealName)
         if company_name == "Unknown Company":
             raise HTTPException(status_code=400, detail="Could not extract company name from deal name")
 
-        # Get month range
+        # Set the company name in the conversation context
+        conversation_context.set_company_name(browser_id, company_name)
+
+        # Parse dates
         try:
-            months = get_month_range(startMonth, endMonth)
+            start_date = datetime.strptime(startDate, "%m-%d-%Y")
+            end_date = datetime.strptime(endDate, "%m-%d-%Y")
+            
+            if start_date > end_date:
+                raise HTTPException(status_code=400, detail="Start date must be before end date")
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail="Invalid date format. Please use MM-DD-YYYY format")
 
         # Track loading statistics
         stats = {
             "company_name": company_name,
-            "months_processed": [],
+            "dates_processed": [],
             "total_chunks_loaded": 0,
-            "months_skipped": [],
-            "months_with_no_data": []
+            "dates_skipped": [],
+            "dates_with_no_data": []
         }
 
-        # Process each month
-        for month in months:
-            month_str = month.strftime("%b").lower()
+        # Process each day in the date range
+        current_date = start_date
+        while current_date <= end_date:
+            date_str = current_date.strftime("%Y-%m-%d")
+            month_str = current_date.strftime("%b").lower()
             
             # Skip if already cached
             if transcript_cache.has_data(company_name, month_str):
                 print(f"Data already cached for {company_name} in {month_str}")
-                stats["months_skipped"].append(month_str)
+                stats["dates_skipped"].append(date_str)
+                current_date += timedelta(days=1)
                 continue
 
-            # Get transcripts from Gong
-            start_date = month.strftime("%Y-%m-%d")
-            end_date = (month.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-            end_date = end_date.strftime("%Y-%m-%d")
-
-            # Get speaker data for the month
+            # Get speaker data for the day
             speaker_data = gong_service.populate_speaker_data(
                 company_name,
-                datetime.strptime(start_date, "%Y-%m-%d"),
-                datetime.strptime(end_date, "%Y-%m-%d")
+                current_date,
+                current_date
             )
 
             # Combine all customer transcripts
@@ -659,8 +681,9 @@ async def load_customer_transcripts(
                     customer_transcripts.append(speaker.full_transcript)
 
             if not customer_transcripts:
-                print(f"No customer transcripts found for {company_name} in {month_str}")
-                stats["months_with_no_data"].append(month_str)
+                print(f"No customer transcripts found for {company_name} on {date_str}")
+                stats["dates_with_no_data"].append(date_str)
+                current_date += timedelta(days=1)
                 continue
 
             # Combine and chunk transcripts
@@ -669,10 +692,12 @@ async def load_customer_transcripts(
 
             # Store chunks in cache
             transcript_cache.store_chunks(company_name, month_str, chunks)
-            print(f"Stored {len(chunks)} chunks for {company_name} in {month_str}")
+            print(f"Stored {len(chunks)} chunks for {company_name} on {date_str}")
             
-            stats["months_processed"].append(month_str)
+            stats["dates_processed"].append(date_str)
             stats["total_chunks_loaded"] += len(chunks)
+            
+            current_date += timedelta(days=1)
 
         return {
             "status": "success",
@@ -687,13 +712,22 @@ async def load_customer_transcripts(
         raise HTTPException(status_code=500, detail=f"Error loading transcripts: {str(e)}")
 
 @router.post("/ask-customer")
-async def ask_customer(request: QuestionRequest):
+async def ask_customer(request: Request, question: QuestionRequest):
     """Ask a question about customer transcripts"""
     try:
-        # Get company name from the query
-        company_name = extract_company_name(request.query)
-        if company_name == "Unknown Company":
-            raise HTTPException(status_code=400, detail="Could not identify company from query")
+        # Get browser ID from request headers
+        browser_id = request.headers.get("X-Browser-ID")
+        if not browser_id:
+            raise HTTPException(status_code=400, detail="Browser ID is required")
+
+        # Try to get company name from context first
+        company_name = conversation_context.get_company_name(browser_id)
+        
+        # If not in context, try to extract from query
+        if not company_name:
+            company_name = extract_company_name(question.query)
+            if company_name == "Unknown Company":
+                raise HTTPException(status_code=400, detail="Could not identify company from query and no previous context found")
 
         # Get all cached chunks for the company
         all_chunks = []
@@ -711,7 +745,7 @@ async def ask_customer(request: QuestionRequest):
             raise HTTPException(status_code=500, detail="Failed to generate embeddings")
 
         # Generate embedding for the query
-        query_embeddings = get_embeddings([request.query])
+        query_embeddings = get_embeddings([question.query])
         if query_embeddings is None or len(query_embeddings) == 0:
             raise HTTPException(status_code=500, detail="Failed to generate query embedding")
 
@@ -733,7 +767,7 @@ async def ask_customer(request: QuestionRequest):
             Answer the question briefly (no more than 2 sentences) purely based on the context provided.
             If the answer cannot be found in the context, say "I don't have enough information."
 
-            Question: {request.query}
+            Question: {question.query}
             Context: {context}
         """
 

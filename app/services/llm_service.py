@@ -21,7 +21,7 @@ def ask_openai(
             {"role": "user", "content": user_content},
         ]
     )
-    output = response.choices[0].message.content.replace("```markdown", "").replace("```code", "").replace("```html", "").replace("```", "")
+    output = response.choices[0].message.content.replace("```markdown", "").replace("```code", "").replace("```html", "").replace("```", "").replace('\n', ' ')
     return output
 
 
@@ -41,5 +41,5 @@ def ask_anthropic(
         max_tokens=1024,
         temperature=0
     )
-    output = response.content[0].text
+    output = response.content[0].text.replace("```markdown", "").replace("```code", "").replace("```html", "").replace("```", "").replace('\n', ' ')
     return output

@@ -152,12 +152,22 @@ class GongService:
     def get_buyer_intent_json(self, call_transcript, seller_name, call_date_str):
         prompt = f"""
             Analyze the buyer sentiment from this transcript. 
-            Return the intent, and a one-line explanation in JSON. 
+            Return the intent, and a structured explanation in JSON. 
             Intent options: Less likely to buy, Neutral, Unsure, Likely to buy, Very likely to buy
             If there is any explicit frustration, hesitation, or uncertainty in buying - choose Less likely to buy.
             Choose 'Very likely to buy' only if there is strong interest from the buyer 
             i.e. they mention they love the product.
-            Include (in the explanation) the challenges or problems the buyer is facing (if they explicitly mention them).
+
+            For the explanation, include the following sections (only if mentioned in the transcript):
+            1. Background & Team Context
+            2. Current State & Use Cases
+            3. Gap Analysis & Pain Points
+            4. Next Steps & Requirements
+            5. Requirements
+
+            Format the explanation as a single string with clear section headers.
+            Please provide your response without using markdown formatting like **, ##.
+            Keep each section brief and only include information explicitly mentioned in the transcript.
             The output should be JSON with 2 fields only: intent and explanation.
             Seller: {seller_name}
             Transcript: {call_transcript}
@@ -168,6 +178,9 @@ class GongService:
                 user_content=prompt,
                 system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
             )
+            
+            # Clean the response by replacing newlines with spaces
+            response = response.replace('\n', ' ')
             
             # Try to parse as JSON
             try:
@@ -181,12 +194,14 @@ class GongService:
                     try:
                         intent_json = json.loads(json_match.group(1))
                     except:
+                        print(Fore.RED + f"Error parsing JSON: {response}" + Style.RESET_ALL)
                         # If still failing, create a default response
                         intent_json = {
                             "intent": "Unable to determine",
                             "explanation": "Could not parse response"
                         }
                 else:
+                    print(Fore.RED + f"Error parsing JSON: {response}" + Style.RESET_ALL)
                     # Create default response
                     intent_json = {
                         "intent": "Unable to determine",
