@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timedelta
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple, Any
 
 import sys
 import os
@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from app.core.config import settings
 from app.services.llm_service import ask_anthropic
-from app.utils.prompts import champion_prompt, company_name_prompt, PARR_PRINCIPLE_PROMPT
+from app.utils.prompts import champion_prompt, parr_principle_prompt, buyer_intent_prompt, pricing_concerns_prompt, no_decision_maker_prompt, already_has_vendor_prompt
 from app.utils.general_utils import extract_company_name
 
 import time
@@ -102,7 +102,7 @@ class GongService:
         cache_ttl = getattr(settings, 'GONG_CACHE_TTL', 604800)  # 7 days in seconds
         self.champion_cache = LRUCache(capacity=cache_capacity, ttl=cache_ttl)
 
-    def list_calls(self, call_date):
+    def list_calls(self, call_date) -> List[Dict]:
         url = "https://us-5738.api.gong.io/v2/calls"
         
         # Format date strings for API
@@ -121,8 +121,8 @@ class GongService:
         else:
             print(Fore.RED + f"Error fetching calls: {response.status_code}, {response.text}" + Style.RESET_ALL)
             return []
-            
-    def find_call_by_title(self, calls, call_title):
+
+    def find_call_by_title(self, calls, call_title) -> str | None:
         """Find a call by its title (case-insensitive)"""
         for call in calls:
             title = call.get("title", "").lower()
@@ -130,7 +130,7 @@ class GongService:
                 return str(call["id"])
         return None
 
-    def get_call_transcripts(self, call_ids, from_date, to_date):
+    def get_call_transcripts(self, call_ids, from_date, to_date) -> Dict[str, Any] | None:
         url = 'https://us-5738.api.gong.io/v2/calls/transcript'
         headers = {'Content-Type': 'application/json'}
         payload = {
@@ -149,33 +149,166 @@ class GongService:
             print(Fore.RED + f"Error fetching transcripts: {response.status_code}, {response.text}" + Style.RESET_ALL)
             return None
 
-    def get_buyer_intent_json(self, call_transcript, seller_name, call_date_str):
-        prompt = f"""
-            Analyze the buyer sentiment from this transcript. 
-            Return the intent, and a structured explanation in JSON. 
-            Intent options: Less likely to buy, Neutral, Unsure, Likely to buy, Very likely to buy
-            If there is any explicit frustration, hesitation, or uncertainty in buying - choose Less likely to buy.
-            Choose 'Very likely to buy' only if there is strong interest from the buyer 
-            i.e. they mention they love the product.
+    def get_potential_concerns(self, call_title: str, call_date_str: str) -> Dict[str, Any]:
+        """Analyze call transcripts for potential concerns using multiple prompts."""
+        print(Fore.MAGENTA + f"Analyzing potential concerns for call: {call_title} on {call_date_str}" + Style.RESET_ALL)
+        
+        # Extract company name from call title
+        company_name = extract_company_name(call_title)
+        if company_name == "Unknown Company" or company_name == "Galileo":
+            print(Fore.RED + f"No company found from call title: {call_title}" + Style.RESET_ALL)
+            return {
+                "pricing_concerns": {"has_concerns": False, "explanation": "Could not identify company"},
+                "no_decision_maker": {"is_issue": False, "explanation": "Could not identify company"},
+                "already_has_vendor": {"has_vendor": False, "explanation": "Could not identify company"}
+            }
 
-            For the explanation, include the following sections (only if mentioned in the transcript):
-            1. Background & Team Context
-            2. Current State & Use Cases
-            3. Gap Analysis & Pain Points
-            4. Next Steps & Requirements
-            5. Requirements
+        print(Fore.MAGENTA + f"Extracted company name: {company_name}" + Style.RESET_ALL)
+        
+        def parse_llm_response(response: str, default_key: str) -> Dict:
+            """Helper function to parse LLM response and handle errors"""
+            try:
+                # Clean the response
+                response = response.replace('```json', '').replace('```', '').replace('\n', '').strip()
+                
+                # Try to parse as JSON
+                try:
+                    return json.loads(response)
+                except json.JSONDecodeError:
+                    # If the response isn't valid JSON, try to extract JSON from text
+                    import re
+                    json_match = re.search(r'(\{.*\})', response, re.DOTALL)
+                    if json_match:
+                        try:
+                            return json.loads(json_match.group(1))
+                        except:
+                            print(Fore.RED + f"Error parsing JSON: {response}" + Style.RESET_ALL)
+                            return {default_key: False, "explanation": "Could not parse response"}
+                    else:
+                        print(Fore.RED + f"Error parsing JSON: {response}" + Style.RESET_ALL)
+                        return {default_key: False, "explanation": "Could not parse response"}
+            except Exception as e:
+                print(Fore.RED + f"Error processing response: {str(e)}" + Style.RESET_ALL)
+                return {default_key: False, "explanation": f"Error: {str(e)}"}
+        
+        try:
+            # Convert string date to datetime if needed
+            if isinstance(call_date_str, str):
+                target_date = datetime.strptime(call_date_str, "%Y-%m-%d")
+            else:
+                target_date = call_date_str
 
-            Format the explanation as a single string with clear section headers.
-            Please provide your response without using markdown formatting like **, ##.
-            Keep each section brief and only include information explicitly mentioned in the transcript.
-            The output should be JSON with 2 fields only: intent and explanation.
-            Seller: {seller_name}
-            Transcript: {call_transcript}
-        """
+            # Calculate date range
+            start_date = target_date + timedelta(days=-2)
+            end_date = target_date + timedelta(days=10)
+            
+            print(Fore.MAGENTA + f"Searching for calls from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}" + Style.RESET_ALL)
+            
+            # Track all results
+            all_results = []
+            current_date = start_date
+            
+            while current_date <= end_date:
+                date_str = current_date.strftime("%Y-%m-%d")
+                print(Fore.MAGENTA + f"\nChecking date: {date_str}" + Style.RESET_ALL)
+                
+                # Get calls for this date
+                calls = self.list_calls(date_str)
+                call_id = self.find_call_by_title(calls, company_name)  # Use company_name instead of call_title
+                
+                if call_id:
+                    print(Fore.GREEN + f"Found call on {date_str}" + Style.RESET_ALL)
+                    
+                    # Get transcripts
+                    start_time = f"{date_str}T00:00:00Z"
+                    end_time = f"{date_str}T23:59:59Z"
+                    transcripts_data = self.get_call_transcripts([call_id], start_time, end_time)
 
+                    if transcripts_data and "callTranscripts" in transcripts_data:
+                        # Combine all non-Galileo transcripts
+                        combined_transcript = ""
+                        for transcript in transcripts_data["callTranscripts"]:
+                            for part in transcript.get("transcript", []):
+                                speaker_id = part.get("speakerId", "unknown")
+                                # Skip Galileo speakers
+                                if "galileo.ai" in speaker_id.lower():
+                                    continue
+                                
+                                if "sentences" in part:
+                                    for sentence in part["sentences"]:
+                                        combined_transcript += sentence.get("text", "") + " "
+
+                        if combined_transcript.strip():
+                            # Analyze with each prompt
+                            print(Fore.MAGENTA + "Analyzing pricing concerns..." + Style.RESET_ALL)
+                            pricing_response = ask_anthropic(
+                                user_content=pricing_concerns_prompt.format(transcript=combined_transcript),
+                                system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
+                            )
+                            pricing_analysis = parse_llm_response(pricing_response, "pricing_concerns")
+
+                            print(Fore.MAGENTA + "Analyzing decision maker presence..." + Style.RESET_ALL)
+                            decision_maker_response = ask_anthropic(
+                                user_content=no_decision_maker_prompt.format(transcript=combined_transcript),
+                                system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
+                            )
+                            decision_maker_analysis = parse_llm_response(decision_maker_response, "no_decision_maker")
+
+                            print(Fore.MAGENTA + "Analyzing existing vendor status..." + Style.RESET_ALL)
+                            vendor_response = ask_anthropic(
+                                user_content=already_has_vendor_prompt.format(transcript=combined_transcript),
+                                system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
+                            )
+                            vendor_analysis = parse_llm_response(vendor_response, "already_has_vendor")
+
+                            # Add results for this call
+                            all_results.append({
+                                "date": date_str,
+                                "result": {
+                                    "pricing_concerns": {
+                                        "has_concerns": pricing_analysis.get("pricing_concerns", False),
+                                        "explanation": pricing_analysis.get("explanation", "No explanation provided")
+                                    },
+                                    "no_decision_maker": {
+                                        "is_issue": decision_maker_analysis.get("no_decision_maker", False),
+                                        "explanation": decision_maker_analysis.get("explanation", "No explanation provided")
+                                    },
+                                    "already_has_vendor": {
+                                        "has_vendor": vendor_analysis.get("already_has_vendor", False),
+                                        "explanation": vendor_analysis.get("explanation", "No explanation provided")
+                                    }
+                                }
+                            })
+                
+                current_date += timedelta(days=1)
+
+            if not all_results:
+                print(Fore.RED + "No calls found in the date range" + Style.RESET_ALL)
+                return {
+                    "pricing_concerns": {"has_concerns": False, "explanation": "No calls found"},
+                    "no_decision_maker": {"is_issue": False, "explanation": "No calls found"},
+                    "already_has_vendor": {"has_vendor": False, "explanation": "No calls found"}
+                }
+
+            # Return the most recent result if multiple calls found
+            latest_result = all_results[-1]["result"]
+            print(Fore.MAGENTA + f"Analysis complete. Found {len(all_results)} calls. Returning most recent result." + Style.RESET_ALL)
+            return latest_result
+
+        except Exception as e:
+            print(Fore.RED + f"Error in get_potential_concerns: {str(e)}" + Style.RESET_ALL)
+            import traceback
+            traceback.print_exc()
+            return {
+                "pricing_concerns": {"has_concerns": False, "explanation": f"Error: {str(e)}"},
+                "no_decision_maker": {"is_issue": False, "explanation": f"Error: {str(e)}"},
+                "already_has_vendor": {"has_vendor": False, "explanation": f"Error: {str(e)}"}
+            }
+
+    def get_buyer_intent_json(self, call_transcript, seller_name, call_date_str) -> Dict:
         try:
             response = ask_anthropic(
-                user_content=prompt,
+                user_content=buyer_intent_prompt.format(call_transcript=call_transcript, seller_name=seller_name),
                 system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
             )
             
@@ -224,7 +357,7 @@ class GongService:
             }
 
 
-    def get_transcript_and_topics(self, call_id, start_time, end_time):
+    def get_transcript_and_topics(self, call_id, start_time, end_time) -> Tuple[str, List[str]]:
         """Get transcript and topics for a call"""
         full_transcript = ""
         topics = []
@@ -454,7 +587,7 @@ class GongService:
         
         return speaker_data
 
-    def get_speaker_champion_results(self, call_title, target_date=None) -> List[Dict]:
+    def get_champion_results(self, call_title, target_date=None) -> List[Dict]:
         try:
             company_name = extract_company_name(call_title)
             if company_name == "Unknown Company":
@@ -483,6 +616,7 @@ class GongService:
             print(Fore.MAGENTA + f"\nTotal speakers found: {len(speaker_transcripts)} = [{', '.join([speaker['speakerName'] for speaker in speaker_transcripts])}]" + Style.RESET_ALL)
 
             llm_responses = []
+            print(Fore.MAGENTA + f"=== ANALYZING TOP 20 SPEAKERS ===" + Style.RESET_ALL)
             for speaker_transcript in speaker_transcripts[:20]:
                 if "galileo" not in speaker_transcript["email"].lower():
                     print(Fore.MAGENTA + f"Analyzing {speaker_transcript['email']}..." + Style.RESET_ALL)
@@ -499,7 +633,7 @@ class GongService:
                         speaker_response["speakerName"] = speaker_transcript["speakerName"]
 
                         parr_response = ask_anthropic(
-                            user_content=PARR_PRINCIPLE_PROMPT.format(speaker_name=speaker_transcript["speakerName"], transcript=transcript),
+                            user_content=parr_principle_prompt.format(speaker_name=speaker_transcript["speakerName"], transcript=transcript),
                             system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
                         ).replace('```json', '').replace('```', '').replace('\n', '').replace('True', 'true').replace('False', 'false').strip()
                         parr_response = json.loads(parr_response)
@@ -512,11 +646,11 @@ class GongService:
                         print(Fore.RED + f"Raw response: {speaker_response}" + Style.RESET_ALL)
                         continue
 
-            print(Fore.MAGENTA + f"\nFinal results: {len(llm_responses)} speakers analyzed" + Style.RESET_ALL)
-            
+            print(Fore.MAGENTA + f"\n{len(llm_responses)} speakers analyzed" + Style.RESET_ALL)
+
             # Cache the results with the company name and date as the key
             self.champion_cache.put(cache_key, llm_responses)
-            print(Fore.MAGENTA + f"Cached champion data for '{company_name}' for date {target_date.strftime('%Y-%m-%d')}" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"Cached champion data" + Style.RESET_ALL)
             
             return llm_responses
             
@@ -526,29 +660,43 @@ class GongService:
             traceback.print_exc()
             return []
 
-    def clear_champion_cache(self):
+    def clear_champion_cache(self) -> None:
         """Clears the champion cache"""
         self.champion_cache.clear()
         print(Fore.MAGENTA + "Champion cache cleared" + Style.RESET_ALL)
         
-    def remove_from_champion_cache(self, deal_name):
+    def remove_from_champion_cache(self, deal_name) -> None:
         """Removes a specific deal from the champion cache"""
         key = extract_company_name(deal_name).lower()
         self.champion_cache.remove(key)
         print(Fore.MAGENTA + f"Removed '{key}' from champion cache" + Style.RESET_ALL)
         
-    def get_cached_champion_deals(self):
+    def get_cached_champion_deals(self) -> List[str]:
         """Returns a list of deal names currently in the cache"""
         return self.champion_cache.keys()
 
-# if __name__ == "__main__":
-
-#     gong_service = GongService()
-
-#     date_str = "2025-03-19"
-#     call_title = "Intro: Cascade <> Galileo"
-
-#     result = gong_service.get_speaker_champion_results(call_title, datetime.strptime(date_str, "%Y-%m-%d"))
-#     print(Fore.YELLOW + "*"*100 + Style.RESET_ALL)
-#     print(Fore.GREEN + f"Result: {result}" + Style.RESET_ALL)
-#     print(Fore.YELLOW + "*"*100 + Style.RESET_ALL)
+if __name__ == "__main__":
+    gong_service = GongService()
+    
+    date_str = "2025-04-15"
+    call_title = "Pandadoc"
+    
+    print(Fore.YELLOW + "="*100 + Style.RESET_ALL)
+    print(Fore.GREEN + f"Testing get_potential_concerns for {call_title}" + Style.RESET_ALL)
+    print(Fore.YELLOW + "="*100 + Style.RESET_ALL)
+    
+    result = gong_service.get_potential_concerns(call_title, date_str)
+    
+    print(Fore.YELLOW + "\nResults:" + Style.RESET_ALL)
+    print(Fore.CYAN + "Pricing Concerns:" + Style.RESET_ALL)
+    print(f"  Has Concerns: {result['pricing_concerns']['has_concerns']}")
+    print(f"  Explanation: {result['pricing_concerns']['explanation']}")
+    
+    print(Fore.CYAN + "\nDecision Maker:" + Style.RESET_ALL)
+    print(f"  Is Issue: {result['no_decision_maker']['is_issue']}")
+    print(f"  Explanation: {result['no_decision_maker']['explanation']}")
+    
+    print(Fore.CYAN + "\nExisting Vendor:" + Style.RESET_ALL)
+    print(f"  Has Vendor: {result['already_has_vendor']['has_vendor']}")
+    print(f"  Explanation: {result['already_has_vendor']['explanation']}")
+    print(Fore.YELLOW + "="*100 + Style.RESET_ALL)

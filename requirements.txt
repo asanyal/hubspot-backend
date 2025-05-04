@@ -38,3 +38,5 @@ urllib3==2.3.0
 uvicorn==0.34.0
 redis>=4.5.0
 scikit-learn>=1.0.0
+google-auth==2.27.0
+python-jose[cryptography]==3.3.0
