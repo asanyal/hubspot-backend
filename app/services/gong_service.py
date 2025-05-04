@@ -678,25 +678,19 @@ class GongService:
 if __name__ == "__main__":
     gong_service = GongService()
     
-    date_str = "2025-04-15"
+    date_str = "2025-04-17"
     call_title = "Pandadoc"
     
     print(Fore.YELLOW + "="*100 + Style.RESET_ALL)
     print(Fore.GREEN + f"Testing get_potential_concerns for {call_title}" + Style.RESET_ALL)
     print(Fore.YELLOW + "="*100 + Style.RESET_ALL)
     
-    result = gong_service.get_potential_concerns(call_title, date_str)
-    
-    print(Fore.YELLOW + "\nResults:" + Style.RESET_ALL)
-    print(Fore.CYAN + "Pricing Concerns:" + Style.RESET_ALL)
-    print(f"  Has Concerns: {result['pricing_concerns']['has_concerns']}")
-    print(f"  Explanation: {result['pricing_concerns']['explanation']}")
-    
-    print(Fore.CYAN + "\nDecision Maker:" + Style.RESET_ALL)
-    print(f"  Is Issue: {result['no_decision_maker']['is_issue']}")
-    print(f"  Explanation: {result['no_decision_maker']['explanation']}")
-    
-    print(Fore.CYAN + "\nExisting Vendor:" + Style.RESET_ALL)
-    print(f"  Has Vendor: {result['already_has_vendor']['has_vendor']}")
-    print(f"  Explanation: {result['already_has_vendor']['explanation']}")
-    print(Fore.YELLOW + "="*100 + Style.RESET_ALL)
+
+    calls = gong_service.list_calls(date_str)
+    call_id = gong_service.find_call_by_title(calls, call_title)
+    print(Fore.GREEN + f"Found call ID: {call_id}" + Style.RESET_ALL)
+
+    start_time = f"{date_str}T00:00:00Z"
+    end_time = f"{date_str}T23:59:59Z"
+    transcripts_data = gong_service.get_call_transcripts([call_id], start_time, end_time)
+    print(Fore.GREEN + f"{transcripts_data}" + Style.RESET_ALL)
