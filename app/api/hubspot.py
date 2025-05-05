@@ -351,7 +351,7 @@ def process_champion_request_sync(browser_id: str, deal_name: str, target_date: 
         print(Fore.BLUE + f"Calling get_speaker_champion_results for {deal_name}" + Style.RESET_ALL)
         # measure the time it takes to process
         start_time = time.time()
-        speaker_champion_results = gong_service.get_champion_results(deal_name, target_date=target_date)
+        speaker_champion_results = gong_service.get_champions(deal_name, target_date=target_date)
         end_time = time.time()
         
         print(Fore.BLUE + f"[PERFORMANCE][contacts-and-champion] Time took: {end_time - start_time} s" + Style.RESET_ALL)
@@ -668,7 +668,7 @@ async def load_customer_transcripts(
                 continue
 
             # Get speaker data for the day
-            speaker_data = gong_service.populate_speaker_data(
+            speaker_data = gong_service.get_speaker_data(
                 company_name,
                 current_date,
                 current_date
@@ -799,7 +799,7 @@ async def get_concerns(
             raise HTTPException(status_code=400, detail="Invalid date format. Please use YYYY-MM-DD format")
 
         # Get concerns analysis from gong service
-        concerns = gong_service.get_potential_concerns(call_title, call_date)
+        concerns = gong_service.get_concerns(call_title, call_date)
         
         return concerns
     except Exception as e:

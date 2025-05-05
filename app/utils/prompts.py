@@ -147,7 +147,7 @@ parr_principle_prompt = """
     Transcript:
     {transcript}
 
-    STRICTLY return the JSON, nothing else.
+    STRICTLY return only the JSON content, no prefix or suffix.
 """
 
 buyer_intent_prompt = """
@@ -171,6 +171,8 @@ buyer_intent_prompt = """
     The output should be JSON with 2 fields only: intent and explanation.
     Seller: {seller_name}
     Transcript: {call_transcript}
+
+    STRICTLY return the JSON, nothing prefix or suffix.
 """
 
 pricing_concerns_prompt = """

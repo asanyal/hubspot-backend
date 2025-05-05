@@ -94,17 +94,15 @@ class GongService:
     def __init__(self):
         self.access_key = settings.GONG_ACCESS_KEY
         self.client_secret = settings.GONG_CLIENT_SECRET
-        self.reschedule_window = 10
-        
-        # Initialize the champion cache
-        # Default: 100 entries with 7-day TTL
+        self.reschedule_window = 1
+
         cache_capacity = getattr(settings, 'GONG_CACHE_CAPACITY', 100)
         cache_ttl = getattr(settings, 'GONG_CACHE_TTL', 604800)  # 7 days in seconds
         self.champion_cache = LRUCache(capacity=cache_capacity, ttl=cache_ttl)
 
     def list_calls(self, call_date) -> List[Dict]:
         url = "https://us-5738.api.gong.io/v2/calls"
-        
+
         # Format date strings for API
         from_datetime = f"{call_date}T00:00:00Z"
         to_datetime = f"{call_date}T23:59:59Z"
@@ -119,10 +117,9 @@ class GongService:
             calls = response.json().get("calls", [])
             return calls
         else:
-            print(Fore.RED + f"Error fetching calls: {response.status_code}, {response.text}" + Style.RESET_ALL)
             return []
 
-    def find_call_by_title(self, calls, call_title) -> str | None:
+    def get_call_id(self, calls, call_title) -> str | None:
         """Find a call by its title (case-insensitive)"""
         for call in calls:
             title = call.get("title", "").lower()
@@ -149,10 +146,10 @@ class GongService:
             print(Fore.RED + f"Error fetching transcripts: {response.status_code}, {response.text}" + Style.RESET_ALL)
             return None
 
-    def get_potential_concerns(self, call_title: str, call_date_str: str) -> Dict[str, Any]:
+    def get_concerns(self, call_title: str, call_date: str) -> Dict[str, Any]:
         """Analyze call transcripts for potential concerns using multiple prompts."""
-        print(Fore.MAGENTA + f"Analyzing potential concerns for call: {call_title} on {call_date_str}" + Style.RESET_ALL)
-        
+        print(Fore.MAGENTA + f"Analyzing potential concerns for call: {call_title} on {call_date}" + Style.RESET_ALL)
+
         # Extract company name from call title
         company_name = extract_company_name(call_title)
         if company_name == "Unknown Company" or company_name == "Galileo":
@@ -193,15 +190,15 @@ class GongService:
         
         try:
             # Convert string date to datetime if needed
-            if isinstance(call_date_str, str):
-                target_date = datetime.strptime(call_date_str, "%Y-%m-%d")
+            if isinstance(call_date, str):
+                target_date = datetime.strptime(call_date, "%Y-%m-%d")
             else:
-                target_date = call_date_str
+                target_date = call_date
 
             # Calculate date range
-            start_date = target_date + timedelta(days=-2)
-            end_date = target_date + timedelta(days=10)
-            
+            start_date = target_date
+            end_date = target_date + timedelta(days=self.reschedule_window)
+
             print(Fore.MAGENTA + f"Searching for calls from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}" + Style.RESET_ALL)
             
             # Track all results
@@ -214,7 +211,7 @@ class GongService:
                 
                 # Get calls for this date
                 calls = self.list_calls(date_str)
-                call_id = self.find_call_by_title(calls, company_name)  # Use company_name instead of call_title
+                call_id = self.get_call_id(calls, company_name)  # Use company_name instead of call_title
                 
                 if call_id:
                     print(Fore.GREEN + f"Found call on {date_str}" + Style.RESET_ALL)
@@ -283,7 +280,6 @@ class GongService:
                 current_date += timedelta(days=1)
 
             if not all_results:
-                print(Fore.RED + "No calls found in the date range" + Style.RESET_ALL)
                 return {
                     "pricing_concerns": {"has_concerns": False, "explanation": "No calls found"},
                     "no_decision_maker": {"is_issue": False, "explanation": "No calls found"},
@@ -374,56 +370,52 @@ class GongService:
         
         return full_transcript, topics
 
-    def get_buyer_intent_for_call(self, call_title, call_date_str, seller_name):
+    def get_buyer_intent(self, call_title, call_date, seller_name):
         try:
-            if isinstance(call_date_str, datetime):
-                call_date_str = call_date_str.strftime("%Y-%m-%d")
+            if isinstance(call_date, datetime):
+                call_date = call_date.strftime("%Y-%m-%d")
             
             # Default response if no call found
             default_response = {
                 "intent": "Not available",
-                "explanation": f"No call found on {call_date_str}"
+                "explanation": f"No call found on {call_date}"
             }
 
-            # Try to find the call
-            calls = self.list_calls(call_date_str)
-            call_id = self.find_call_by_title(calls, call_title)
+            calls = self.list_calls(call_date) # Lists calls on just that date
+            call_id = self.get_call_id(calls, call_title)
 
             if not call_id:
                 # Try the next day
                 try:
-                    call_date = datetime.strptime(call_date_str, "%Y-%m-%d") + timedelta(days=1)
-                    call_date_str = call_date.strftime("%Y-%m-%d")
-                    print(f"Call not found. Checking {call_date_str}")
+                    call_date = datetime.strptime(call_date, "%Y-%m-%d") + timedelta(days=1)
+                    call_date = call_date.strftime("%Y-%m-%d")
                     
-                    calls = self.list_calls(call_date_str) # call again, for the next day
+                    calls = self.list_calls(call_date) # call again, for the next day
+
                     if not calls or len(calls) == 0:
-                        print(f"No calls found on {call_date_str}.")
                         return default_response
                         
-                    print(f"{len(calls)} calls found on {call_date_str}. Now searching for specific title.")
-                    call_id = self.find_call_by_title(calls, call_title)
+                    call_id = self.get_call_id(calls, call_title)
                     if not call_id:
-                        print(f"Could not find a call with title '{call_title}' on {call_date_str} either!")
                         return default_response
                 except Exception as e:
                     print(Fore.RED + f"Error checking next day: {str(e)}" + Style.RESET_ALL)
                     return default_response
 
             if call_id:
-                start_time = f"{call_date_str}T00:00:00Z"
-                end_time = f"{call_date_str}T23:59:59Z"
+                start_time = f"{call_date}T00:00:00Z"
+                end_time = f"{call_date}T23:59:59Z"
                 full_transcript, topics = self.get_transcript_and_topics(call_id, start_time, end_time)
 
                 if not full_transcript:
                     print(Fore.RED + "No transcript found" + Style.RESET_ALL)
                     return {
                         "intent": "No Transcript",
-                        "explanation": f"Call found but transcript unavailable for '{call_title}' on {call_date_str}"
+                        "explanation": f"Call found but transcript unavailable for '{call_title}' on {call_date}"
                     }
 
                 # Get buyer intent analysis for the transcript
-                return self.get_buyer_intent_json(full_transcript, seller_name, call_date_str)
+                return self.get_buyer_intent_json(full_transcript, seller_name, call_date)
             
             return default_response
         except Exception as e:
@@ -433,7 +425,7 @@ class GongService:
                 "explanation": f"Error analyzing call: {str(e)}"
             }
 
-    def populate_speaker_data(self, company_name: str, start_date: datetime, end_date: datetime) -> Dict[str, Speaker]:
+    def get_speaker_data(self, company_name: str, start_date: datetime, end_date: datetime) -> Dict[str, Speaker]:
         """Populate speaker data from Gong API calls within the given date range."""
         speaker_data: Dict[str, Speaker] = {}
 
@@ -587,7 +579,7 @@ class GongService:
         
         return speaker_data
 
-    def get_champion_results(self, call_title, target_date=None) -> List[Dict]:
+    def get_champions(self, call_title, target_date=None) -> List[Dict]:
         try:
             company_name = extract_company_name(call_title)
             if company_name == "Unknown Company":
@@ -601,25 +593,28 @@ class GongService:
                 target_date = datetime.now()
             
             # Calculate date range
-            start_date = target_date + timedelta(days=-1)
+            start_date = target_date
             end_date = target_date + timedelta(days=self.reschedule_window)
 
-            print(Fore.MAGENTA + f"Searching for calls '{company_name}' around {target_date.strftime('%Y-%m-%d')} + {self.reschedule_window} days" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"Champion Extraction: Searching for calls '{company_name}' around {target_date.strftime('%Y-%m-%d')} + {self.reschedule_window} days" + Style.RESET_ALL)
             
             # Get speaker data using the new method
-            speaker_data = self.populate_speaker_data(company_name, start_date, end_date)
-            print(Fore.MAGENTA + f"{len(speaker_data)} speaker data retrieved." + Style.RESET_ALL)
+            speaker_data = self.get_speaker_data(company_name, start_date, end_date)
+            print(Fore.MAGENTA + f"Champion Extraction: {len(speaker_data)} speaker data retrieved." + Style.RESET_ALL)
 
             # Convert speaker objects to dictionaries for compatibility
             speaker_transcripts = [speaker.to_dict() for speaker in speaker_data.values()]
 
-            print(Fore.MAGENTA + f"\nTotal speakers found: {len(speaker_transcripts)} = [{', '.join([speaker['speakerName'] for speaker in speaker_transcripts])}]" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"\nChampion Extraction: Total speakers found: {len(speaker_transcripts)} = [{', '.join([speaker['speakerName'] for speaker in speaker_transcripts])}]" + Style.RESET_ALL)
+            if len(speaker_transcripts) == 0:
+                print(Fore.MAGENTA + "Champion Extraction: No speakers found, returning empty response" + Style.RESET_ALL)
+                return []
 
             llm_responses = []
             print(Fore.MAGENTA + f"=== ANALYZING TOP 20 SPEAKERS ===" + Style.RESET_ALL)
             for speaker_transcript in speaker_transcripts[:20]:
                 if "galileo" not in speaker_transcript["email"].lower():
-                    print(Fore.MAGENTA + f"Analyzing {speaker_transcript['email']}..." + Style.RESET_ALL)
+                    print(Fore.MAGENTA + f"Champion Extraction: Analyzing {speaker_transcript['email']}..." + Style.RESET_ALL)
 
                     transcript = speaker_transcript["full_transcript"]
 
@@ -635,27 +630,27 @@ class GongService:
                         parr_response = ask_anthropic(
                             user_content=parr_principle_prompt.format(speaker_name=speaker_transcript["speakerName"], transcript=transcript),
                             system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
-                        ).replace('```json', '').replace('```', '').replace('\n', '').replace('True', 'true').replace('False', 'false').strip()
+                        ).replace('```json', '').replace('json', '').replace('```', '').replace('\n', '').replace('True', 'true').replace('False', 'false').strip()
                         parr_response = json.loads(parr_response)
 
                         speaker_response["parr_analysis"] = parr_response
 
                         llm_responses.append(speaker_response)
                     except json.JSONDecodeError as e:
-                        print(Fore.RED + f"Error parsing LLM response: {e}" + Style.RESET_ALL)
-                        print(Fore.RED + f"Raw response: {speaker_response}" + Style.RESET_ALL)
+                        print(Fore.RED + f"Champion Extraction: Error parsing LLM response: {e}" + Style.RESET_ALL)
+                        print(Fore.RED + f"Champion Extraction: Raw response: {speaker_response}" + Style.RESET_ALL)
                         continue
 
-            print(Fore.MAGENTA + f"\n{len(llm_responses)} speakers analyzed" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"\nChampion Extraction: {len(llm_responses)} speakers analyzed" + Style.RESET_ALL)
 
             # Cache the results with the company name and date as the key
             self.champion_cache.put(cache_key, llm_responses)
-            print(Fore.MAGENTA + f"Cached champion data" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"Champion Extraction: Cached champion data" + Style.RESET_ALL)
             
             return llm_responses
             
         except Exception as e:
-            print(Fore.RED + f"Error in get_speaker_transcripts: {str(e)}" + Style.RESET_ALL)
+            print(Fore.RED + f"Champion Extraction: Error in get_speaker_transcripts: {str(e)}" + Style.RESET_ALL)
             import traceback
             traceback.print_exc()
             return []
@@ -687,7 +682,7 @@ if __name__ == "__main__":
     
 
     calls = gong_service.list_calls(date_str)
-    call_id = gong_service.find_call_by_title(calls, call_title)
+    call_id = gong_service.get_call_id(calls, call_title)
     print(Fore.GREEN + f"Found call ID: {call_id}" + Style.RESET_ALL)
 
     start_time = f"{date_str}T00:00:00Z"

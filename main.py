@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import hubspot
+from app.api import hubspot, hubspot_mongo
 from app.middleware.session_middleware import SessionMiddleware
 from app.middleware.response_middleware import ResponseMiddleware
 
@@ -23,6 +23,7 @@ app.add_middleware(ResponseMiddleware)
 
 # Include routers
 app.include_router(hubspot.router, prefix="/api/hubspot", tags=["hubspot"])
+app.include_router(hubspot_mongo.router, prefix="/api/hubspot/v2", tags=["hubspot-v2"])
 
 if __name__ == "__main__":
     import uvicorn

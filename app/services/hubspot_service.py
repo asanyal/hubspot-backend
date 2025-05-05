@@ -682,9 +682,9 @@ class HubspotService:
 
                     buyer_intent = {"intent": "N/A", "explanation": "N/A"}
                     if display_type == "Meeting":
-                        result = self.gong_service.get_buyer_intent_for_call(
+                        result = self.gong_service.get_buyer_intent(
                             call_title=subject.strip(), 
-                            call_date_str=date_time.strftime('%Y-%m-%d'),
+                            call_date=date_time.strftime('%Y-%m-%d'),
                             seller_name="Atin Sanyal"
                         )
                         # Add null check here
@@ -696,6 +696,11 @@ class HubspotService:
                     ## content
                     sentiment = "neutral"
                     if content is not None and content != "":
+                        # Truncate content to a reasonable length before analysis
+                        max_content_length = 10000  # Roughly 2500 tokens
+                        if len(content) > max_content_length:
+                            content = content[:max_content_length] + "..."
+                            
                         sentiment = ask_openai(
                             system_content="You are a smart Sales Operations Analyst that analyzes Sales emails.",
                             user_content=f"""
@@ -704,6 +709,8 @@ class HubspotService:
                             Return only one word: positive, negative, or neutral
                             """
                         )
+
+                        # Truncate content for summary
                         content = ask_openai(
                             system_content="You are a smart Sales Operations Analyst that summarizes Sales emails.",
                             user_content=f"""
@@ -713,6 +720,7 @@ class HubspotService:
                         
                     # Prepare content preview
                     content_preview = content[:150] + "..." if len(content) > 150 else content
+                    
                     # Store in thread-safe way
                     cache_data = {
                         "type": display_type,
@@ -740,10 +748,6 @@ class HubspotService:
                         "buyer_intent": buyer_intent["intent"],
                         "buyer_intent_explanation": buyer_intent["explanation"]
                     }
-                    
-                    # Only include full content if specifically requested
-                    if include_content:
-                        event["content"] = content
                     
                     return {
                         "event": event, 

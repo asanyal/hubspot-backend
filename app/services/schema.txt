@@ -1,0 +1,76 @@
+Mongo Spotlight Schema
+
+// DealInfo
+{
+    _id: ObjectId,
+    deal_id: String,  // HubSpot ID
+    deal_name: String,
+    company_name: String,
+    stage: String,
+    owner: String,
+    created_date: Date,
+    last_modified_date: Date
+}
+
+// DealActivity
+{
+    _id: ObjectId,
+    deal_id: String,  // References DealInfo
+    total_activities: Number,
+    positive_emails: Number,
+    high_intent_signals: Number,
+    less_likely_to_buy: Number,
+    pricing_concerns: Number,
+    no_decision_maker: Number,
+    existing_vendor: Number,
+    potential_concerns: {
+        pricing_concerns: { has_concerns: Boolean, explanation: String },
+        no_decision_maker: { is_issue: Boolean, explanation: String },
+        already_has_vendor: { has_vendor: Boolean, explanation: String }
+    },
+    last_updated: Date
+}
+
+// DealTimeline
+{
+    _id: ObjectId,
+    deal_id: String,  // References DealInfo
+    events: [{
+        event_id: String,
+        event_type: String,
+        event_date: Date,
+        subject: String,
+        content: String,
+        sentiment: String
+    }],
+    last_updated: Date
+}
+
+// DealMeetingInfo
+{
+    _id: ObjectId,
+    deal_id: String,  // References DealInfo
+    meeting_id: String,  // Gong ID
+    meeting_title: String,
+    meeting_date: Date,
+    buyer_intent: {
+        intent: String,
+        explanation: String
+    },
+    champion_analysis: {
+        champion: Boolean,
+        explanation: String,
+        email: String,
+        speaker_name: String,
+        business_pain: String,
+        parr_analysis: {
+            pain: Number,
+            authority: Number,
+            preference: Number,
+            role: Number,
+            parr_explanation: String
+        }
+    },
+    transcript: String,
+    last_updated: Date
+}

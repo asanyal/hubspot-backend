@@ -1,6 +1,8 @@
 import os
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from typing import Optional, ClassVar
+from urllib.parse import quote_plus
 
 load_dotenv()
 
@@ -25,5 +27,9 @@ class Settings(BaseModel):
     TRANSCRIPT_CACHE_TTL: int = int(os.getenv("TRANSCRIPT_CACHE_TTL", "86400"))  # 24 hours in seconds
     CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "600"))
     TOP_K_CHUNKS: int = int(os.getenv("TOP_K_CHUNKS", "10"))
+
+    # MongoDB Configuration
+    MONGO_URI: str = f"mongodb+srv://{quote_plus('atin')}:{quote_plus('Galileo@$123')}@cluster0.2dvzkmk.mongodb.net/spotlight_db?retryWrites=true&w=majority&appName=Cluster0"
+    MONGO_DB_NAME: str = "spotlight_db"
 
 settings = Settings()
