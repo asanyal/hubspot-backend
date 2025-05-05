@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -9,8 +10,11 @@ from app.repositories.deal_info_repository import DealInfoRepository
 from app.repositories.deal_activity_repository import DealActivityRepository
 from app.repositories.deal_timeline_repository import DealTimelineRepository
 from app.repositories.deal_meeting_info_repository import DealMeetingInfoRepository
+from app.repositories.company_overview_repository import CompanyOverviewRepository
 from app.utils.general_utils import extract_company_name
 from app.services.hubspot_service import HubspotService
+from app.services.firecrawl_service import get_company_analysis
+from app.core.config import settings
 from colorama import Fore, Style
 
 class DataSyncService:
@@ -21,6 +25,7 @@ class DataSyncService:
         self.deal_activity_repo = DealActivityRepository()
         self.deal_timeline_repo = DealTimelineRepository()
         self.deal_meeting_info_repo = DealMeetingInfoRepository()
+        self.company_overview_repo = CompanyOverviewRepository()
 
     def sync(self, stage: str = "all", epoch0: str = "2025-02-15") -> None:
         all_deals = self.hubspot_service.get_all_deals()
@@ -40,21 +45,18 @@ class DataSyncService:
                     continue
 
                 print(Fore.YELLOW + f"\n### Syncing Global Data for: {deal_name} ###" + Style.RESET_ALL)
+                
                 self.sync_global_deal_data(deal_name, epoch0)
+                self.sync_company_overviews(deal_name)
 
-                # Sync data for this deal
                 today = datetime.now().strftime("%Y-%m-%d")
-                # Convert start_date to datetime
                 current_date = datetime.strptime(epoch0, "%Y-%m-%d")
                 end_date = datetime.strptime(today, "%Y-%m-%d")
 
-
                 print(Fore.YELLOW + f"\n### Syncing Meeting Data for: {deal_name} from {epoch0} to {today} ###" + Style.RESET_ALL)
-                # Loop through each date from start_date to today
+
                 while current_date <= end_date:
                     current_date_str = current_date.strftime("%Y-%m-%d")
-
-                    # Sync data for this deal and date
                     self._sync_meeting_info(deal_name, current_date_str)
                     current_date += timedelta(days=1)
 
@@ -310,3 +312,30 @@ class DataSyncService:
         except Exception as e:
             print(Fore.RED + f"Error getting timeline data: {str(e)}" + Style.RESET_ALL)
             stats["errors"].append(f"Error getting timeline data: {str(e)}")
+
+    def sync_company_overviews(self, deal_name: str) -> None:
+        """Sync company overviews for a specific deal"""
+        try:
+            # Extract company name from deal name
+            company_name = extract_company_name(deal_name)
+            
+            if not company_name or company_name == "Unknown Company":
+                print(Fore.RED + f"No valid company name found for deal {deal_name}" + Style.RESET_ALL)
+                return
+            
+            # Get company analysis from Firecrawl
+            overview = get_company_analysis(company_name)
+
+            # Store in MongoDB
+            self.company_overview_repo.upsert_by_deal_id(deal_name, overview)
+            print(Fore.GREEN + f"Synced company overview for {company_name}" + Style.RESET_ALL)
+                
+        except Exception as e:
+            print(Fore.RED + f"Error syncing company overviews: {str(e)}" + Style.RESET_ALL)
+            raise
+
+if __name__ == "__main__":
+    # Create event loop and run sync
+    loop = asyncio.get_event_loop()
+    sync_service = DataSyncService()
+    loop.run_until_complete(sync_service.sync())

@@ -7,6 +7,7 @@ from app.repositories.deal_info_repository import DealInfoRepository
 from app.repositories.deal_activity_repository import DealActivityRepository
 from app.repositories.deal_timeline_repository import DealTimelineRepository
 from app.repositories.deal_meeting_info_repository import DealMeetingInfoRepository
+from app.repositories.company_overview_repository import CompanyOverviewRepository
 from colorama import Fore, Style, init
 
 init()
@@ -16,6 +17,7 @@ deal_info_repo = DealInfoRepository()
 deal_activity_repo = DealActivityRepository()
 deal_timeline_repo = DealTimelineRepository()
 deal_meeting_info_repo = DealMeetingInfoRepository()
+company_overview_repo = CompanyOverviewRepository()
 
 def convert_mongo_doc(doc: Dict) -> Dict:
     """Convert MongoDB document to JSON-serializable format"""
@@ -216,7 +218,7 @@ async def get_deal_timeline(
                     event_date = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
                 except (ValueError, TypeError):
                     event_date = datetime.now()
-            
+
             # Format the event to match old format
             formatted_event = {
                 "id": event.get('event_id', ''),
@@ -232,7 +234,7 @@ async def get_deal_timeline(
                 "buyer_intent_explanation": event.get('buyer_intent_explanation', 'N/A')
             }
             formatted_events.append(formatted_event)
-        
+
         # Format the response
         response = {
             "events": formatted_events,
@@ -334,15 +336,15 @@ async def get_contacts_and_champion(
 
 @router.get("/get-concerns", response_model=Dict[str, Any])
 async def get_concerns(
-    call_title: str = Query(..., description="The title of the call to analyze"),
-    call_date: str = Query(..., description="The date of the call in YYYY-MM-DD format")
+    dealName: str = Query(..., description="The name of the deal"),
 ):
-    """Get potential concerns analysis for a specific call"""
-    print(Fore.BLUE + f"#### Getting concerns for call: {call_title} on {call_date}" + Style.RESET_ALL)
+    """Get potential concerns analysis for a specific deal"""
+    print(Fore.BLUE + f"#### Getting concerns for deal: {dealName}." + Style.RESET_ALL)
     try:
         # Get deal activity data
-        deal_activity = deal_activity_repo.get_by_deal_id(call_title)
+        deal_activity = deal_activity_repo.get_by_deal_id(dealName)
         if not deal_activity:
+            print(Fore.YELLOW + f"No deal activity found for: {dealName}" + Style.RESET_ALL)
             return {
                 "pricing_concerns": {"has_concerns": False, "explanation": "No data available"},
                 "no_decision_maker": {"is_issue": False, "explanation": "No data available"},
@@ -352,20 +354,27 @@ async def get_concerns(
         # Get the most recent concerns from the concerns array
         concerns = deal_activity.get('concerns', [])
         if not concerns:
+            print(Fore.YELLOW + f"No concerns data found for: {dealName}" + Style.RESET_ALL)
             return {
                 "pricing_concerns": {"has_concerns": False, "explanation": "No concerns data available"},
                 "no_decision_maker": {"is_issue": False, "explanation": "No concerns data available"},
                 "already_has_vendor": {"has_vendor": False, "explanation": "No concerns data available"}
             }
-            
+        else:
+            print(Fore.GREEN + f"Found concerns data: {concerns}" + Style.RESET_ALL)
+
         # Get the most recent concerns (last in the array)
         latest_concerns = concerns[-1]
+        print(Fore.GREEN + f"Found concerns data: {latest_concerns}" + Style.RESET_ALL)
         
-        return {
+        response = {
             "pricing_concerns": latest_concerns.get('pricing_concerns', {"has_concerns": False, "explanation": "No pricing concerns data"}),
             "no_decision_maker": latest_concerns.get('no_decision_maker', {"is_issue": False, "explanation": "No decision maker data"}),
             "already_has_vendor": latest_concerns.get('already_has_vendor', {"has_vendor": False, "explanation": "No vendor data"})
         }
+        print(Fore.GREEN + f"Returning response: {response}" + Style.RESET_ALL)
+        return response
+        
     except Exception as e:
         print(Fore.RED + f"Error in get-concerns endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
@@ -417,4 +426,26 @@ async def get_pipeline_summary():
         print(Fore.RED + f"Pipeline summary error: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error creating pipeline summary: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error creating pipeline summary: {str(e)}")
+
+@router.get("/company-overview", response_model=Dict[str, str])
+async def get_company_overview(dealName: str = Query(..., description="The name of the deal")):
+    """Get company overview for a specific deal from MongoDB"""
+    print(Fore.BLUE + f"#### Getting company overview for deal: {dealName}" + Style.RESET_ALL)
+    
+    try:
+        # Get company overview from MongoDB
+        overview_data = company_overview_repo.get_by_deal_id(dealName)
+        
+        if not overview_data:
+            print(Fore.YELLOW + f"No company overview found for deal: {dealName}" + Style.RESET_ALL)
+            return {"overview": "No company info available"}
+            
+        return {"overview": overview_data.get('overview', 'No company info available')}
+        
+    except Exception as e:
+        print(Fore.RED + f"Error in company-overview endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        # Return a graceful response instead of raising an error
+        return {"overview": "No company info available"} 
