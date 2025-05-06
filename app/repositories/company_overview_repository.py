@@ -3,7 +3,7 @@ from pymongo import UpdateOne
 
 class CompanyOverviewRepository(BaseRepository):
     def __init__(self):
-        super().__init__("company_overviews")
+        super().__init__("company_overview")
         
     def get_by_deal_id(self, deal_id: str) -> dict:
         """Get company overview by deal ID"""

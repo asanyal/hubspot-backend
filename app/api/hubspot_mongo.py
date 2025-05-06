@@ -4,9 +4,9 @@ from datetime import datetime
 from collections import Counter
 from bson import ObjectId
 from app.repositories.deal_info_repository import DealInfoRepository
-from app.repositories.deal_activity_repository import DealActivityRepository
+from app.repositories.deal_insights_repository import DealInsightsRepository
 from app.repositories.deal_timeline_repository import DealTimelineRepository
-from app.repositories.deal_meeting_info_repository import DealMeetingInfoRepository
+from app.repositories.meeting_insights_repository import MeetingInsightsRepository
 from app.repositories.company_overview_repository import CompanyOverviewRepository
 from colorama import Fore, Style, init
 
@@ -14,9 +14,9 @@ init()
 
 router = APIRouter()
 deal_info_repo = DealInfoRepository()
-deal_activity_repo = DealActivityRepository()
+deal_insights_repo = DealInsightsRepository()
 deal_timeline_repo = DealTimelineRepository()
-deal_meeting_info_repo = DealMeetingInfoRepository()
+meeting_insights_repo = MeetingInsightsRepository()
 company_overview_repo = CompanyOverviewRepository()
 
 def convert_mongo_doc(doc: Dict) -> Dict:
@@ -192,7 +192,7 @@ async def get_deal_timeline(
             }
             
         # Get meeting info for champion data
-        meeting_info = deal_meeting_info_repo.get_by_deal_id(dealName)
+        meeting_info = meeting_insights_repo.get_by_deal_id(dealName)
         
         # Process champions data
         all_champions = []
@@ -305,7 +305,7 @@ async def get_contacts_and_champion(
     print(Fore.BLUE + f"[{date}] Contacts and champion for deal: {dealName}" + Style.RESET_ALL)
     try:
         # Get meeting info for the deal
-        meeting_info = deal_meeting_info_repo.get_by_deal_id(dealName)
+        meeting_info = meeting_insights_repo.get_by_deal_id(dealName)
         if not meeting_info:
             return {
                 "contacts": [],
@@ -341,10 +341,10 @@ async def get_concerns(
     """Get potential concerns analysis for a specific deal"""
     print(Fore.BLUE + f"#### Getting concerns for deal: {dealName}." + Style.RESET_ALL)
     try:
-        # Get deal activity data
-        deal_activity = deal_activity_repo.get_by_deal_id(dealName)
+        # Get deal insights
+        deal_activity = deal_insights_repo.get_by_deal_id(dealName)
         if not deal_activity:
-            print(Fore.YELLOW + f"No deal activity found for: {dealName}" + Style.RESET_ALL)
+            print(Fore.YELLOW + f"No deal insights found for: {dealName}" + Style.RESET_ALL)
             return {
                 "pricing_concerns": {"has_concerns": False, "explanation": "No data available"},
                 "no_decision_maker": {"is_issue": False, "explanation": "No data available"},
@@ -402,23 +402,32 @@ async def get_pipeline_summary():
         # Get all deals
         all_deals = deal_info_repo.get_all_deals()
         
-        # Extract stages
-        stages = [deal.get('stage', 'Unknown') for deal in all_deals if deal.get('stage')]
+        # Create a dictionary to store stage summaries
+        stage_summary = {}
         
-        # Count number of deals in each stage
-        stage_counts = Counter(stages)
+        for deal in all_deals:
+            stage = deal.get('stage', 'Unknown')
+            amount_str = deal.get('amount', '0')
+            
+            # Convert amount string to float, handling currency format
+            try:
+                # Remove $ and commas, then convert to float
+                amount = float(amount_str.replace('$', '').replace(',', ''))
+            except (ValueError, TypeError):
+                amount = 0
+            
+            if stage not in stage_summary:
+                stage_summary[stage] = {
+                    "stage": stage,
+                    "count": 0,
+                    "amount": 0
+                }
+            
+            stage_summary[stage]["count"] += 1
+            stage_summary[stage]["amount"] += amount
         
-        # Create summary data
-        summary = [
-            {
-                "stage": stage,
-                "count": count,
-                "amount": 0  # Amount not available in MongoDB schema
-            }
-            for stage, count in stage_counts.items()
-        ]
-        
-        # Sort by count descending
+        # Convert dictionary to list and sort by count
+        summary = list(stage_summary.values())
         summary = sorted(summary, key=lambda x: x["count"], reverse=True)
         
         return summary

@@ -7,9 +7,9 @@ from typing import Dict, List, Optional, Any
 
 from app.services.gong_service import GongService
 from app.repositories.deal_info_repository import DealInfoRepository
-from app.repositories.deal_activity_repository import DealActivityRepository
+from app.repositories.deal_insights_repository import DealInsightsRepository
 from app.repositories.deal_timeline_repository import DealTimelineRepository
-from app.repositories.deal_meeting_info_repository import DealMeetingInfoRepository
+from app.repositories.meeting_insights_repository import MeetingInsightsRepository
 from app.repositories.company_overview_repository import CompanyOverviewRepository
 from app.utils.general_utils import extract_company_name
 from app.services.hubspot_service import HubspotService
@@ -22,9 +22,9 @@ class DataSyncService:
         self.gong_service = GongService()
         self.hubspot_service = HubspotService()
         self.deal_info_repo = DealInfoRepository()
-        self.deal_activity_repo = DealActivityRepository()
+        self.deal_insights_repo = DealInsightsRepository()
         self.deal_timeline_repo = DealTimelineRepository()
-        self.deal_meeting_info_repo = DealMeetingInfoRepository()
+        self.meeting_insights_repo = MeetingInsightsRepository()
         self.company_overview_repo = CompanyOverviewRepository()
 
     def sync(self, stage: str = "all", epoch0: str = "2025-02-15") -> None:
@@ -37,7 +37,7 @@ class DataSyncService:
             ]
             print(Fore.MAGENTA + f"Filtered to the {len(all_deals)} deals in stage '{stage}'" + Style.RESET_ALL) 
 
-        # Process each deal
+
         for deal in all_deals:
             try:
                 deal_name = deal.get("dealname")
@@ -77,15 +77,15 @@ class DataSyncService:
         }
 
         try:
-            # Extract company name from the full deal name
+
             company_name = extract_company_name(deal_name)
             if company_name == "Unknown Company":
                 print(Fore.RED + f"Could not extract company name from deal name: {deal_name}" + Style.RESET_ALL)
                 return
 
-            # Sync each component
+
             self._sync_deal_info(deal_name, company_name, stats) ### Global
-            self._sync_deal_activities(deal_name, epoch0, stats) ### Global
+            self._sync_deal_insights(deal_name, epoch0, stats) ### Global
             self._sync_timeline_events(deal_name, epoch0, stats) ### Global
 
             return
@@ -103,13 +103,13 @@ class DataSyncService:
             stats: Statistics dictionary to update
         """
         try:
-            # Get deal info from HubSpot
+
             hubspot_deal = self._get_hubspot_deal_info(deal_name)
             if not hubspot_deal:
                 print(Fore.RED + f"Could not find deal '{deal_name}' in HubSpot" + Style.RESET_ALL)
                 return
 
-            # Format amount if present
+
             amount = hubspot_deal.get("amount", "N/A")
             if amount and amount != "N/A":
                 try:
@@ -117,7 +117,7 @@ class DataSyncService:
                 except (ValueError, TypeError):
                     amount = "N/A"
 
-            # Create deal info document according to schema
+
             deal_info = {
                 "deal_id": hubspot_deal.get("dealId", deal_name),  # Use HubSpot ID if available
                 "deal_name": deal_name,
@@ -176,8 +176,8 @@ class DataSyncService:
         except (ValueError, TypeError):
             return datetime.now()
 
-    def _sync_deal_activities(self, deal_name: str, epoch0: str, stats: Dict) -> None:
-        """Sync deal activities and concerns"""
+    def _sync_deal_insights(self, deal_name: str, epoch0: str, stats: Dict) -> None:
+        """Sync deal insights and concerns"""
 
         company_name = extract_company_name(deal_name)
 
@@ -203,8 +203,8 @@ class DataSyncService:
 
         if len(concerns) > 0:
             activity_data = self._create_activity_data(deal_name, concerns)
-            print(Fore.BLUE + f"[MongoDB] Updating DealActivity for {deal_name}." + Style.RESET_ALL)
-            self.deal_activity_repo.upsert_activity(deal_name, activity_data)
+            print(Fore.BLUE + f"[MongoDB] Updating DealInsights for {deal_name}." + Style.RESET_ALL)
+            self.deal_insights_repo.upsert_activity(deal_name, activity_data)
 
     def _create_activity_data(self, deal_name: str, concerns: Dict) -> Dict:
         """Create activity data structure from concerns"""
@@ -283,8 +283,8 @@ class DataSyncService:
                     "last_updated": datetime.now()
                 }
 
-                print(Fore.BLUE + f"[MongoDB] Updating DealMeetingInfo for {deal_name}." + Style.RESET_ALL)
-                self.deal_meeting_info_repo.upsert_meeting(
+                print(Fore.BLUE + f"[MongoDB] Updating MeetingInsights for {deal_name}." + Style.RESET_ALL)
+                self.meeting_insights_repo.upsert_meeting(
                     deal_name,
                     meeting_data["meeting_id"],
                     meeting_data
