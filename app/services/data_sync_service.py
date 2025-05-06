@@ -57,7 +57,7 @@ class DataSyncService:
 
                 while current_date <= end_date:
                     current_date_str = current_date.strftime("%Y-%m-%d")
-                    self._sync_meeting_info(deal_name, current_date_str)
+                    self._sync_meeting_insights(deal_name, current_date_str)
                     current_date += timedelta(days=1)
 
             except Exception as e:
@@ -202,11 +202,11 @@ class DataSyncService:
             start_date += timedelta(days=1)
 
         if len(concerns) > 0:
-            activity_data = self._create_activity_data(deal_name, concerns)
+            deal_insights_data = self._create_deal_insights_data(deal_name, concerns)
             print(Fore.BLUE + f"[MongoDB] Updating DealInsights for {deal_name}." + Style.RESET_ALL)
-            self.deal_insights_repo.upsert_activity(deal_name, activity_data)
+            self.deal_insights_repo.upsert_activity(deal_name, deal_insights_data)
 
-    def _create_activity_data(self, deal_name: str, concerns: Dict) -> Dict:
+    def _create_deal_insights_data(self, deal_name: str, concerns: Dict) -> Dict:
         """Create activity data structure from concerns"""
         # pricing_concerns should be 1 if any of the concerns have a pricing concern
         pricing_concerns = 0
@@ -238,7 +238,7 @@ class DataSyncService:
             "last_updated": datetime.now()
         }
 
-    def _sync_meeting_info(self, deal_name: str, call_date: str) -> None:
+    def _sync_meeting_insights(self, deal_name: str, call_date: str) -> None:
         """Sync meeting information including champion analysis and buyer intent"""
         try:
             # First check if there are any meetings for this deal on the given date
@@ -332,6 +332,40 @@ class DataSyncService:
                 
         except Exception as e:
             print(Fore.RED + f"Error syncing company overviews: {str(e)}" + Style.RESET_ALL)
+            raise
+
+    def sync_single_deal(self, deal_name: str, epoch0: str = "2025-02-15") -> None:
+        """
+        Sync data for a single deal across all collections
+        Args:
+            deal_name: The name of the deal to sync
+            epoch0: The start date for syncing historical data
+        """
+        try:
+            print(Fore.YELLOW + f"\n### Syncing Global Data for: {deal_name} ###" + Style.RESET_ALL)
+            
+            # Sync global deal data (deal info, insights, timeline)
+            self.sync_global_deal_data(deal_name, epoch0)
+            
+            # Sync company overview
+            # self.sync_company_overviews(deal_name)
+
+            # Sync meeting data from epoch0 to today
+            today = datetime.now().strftime("%Y-%m-%d")
+            current_date = datetime.strptime(epoch0, "%Y-%m-%d")
+            end_date = datetime.strptime(today, "%Y-%m-%d")
+
+            print(Fore.YELLOW + f"\n### Syncing Meeting Data for: {deal_name} from {epoch0} to {today} ###" + Style.RESET_ALL)
+
+            while current_date <= end_date:
+                current_date_str = current_date.strftime("%Y-%m-%d")
+                self._sync_meeting_insights(deal_name, current_date_str)
+                current_date += timedelta(days=1)
+
+            print(Fore.GREEN + f"\nSuccessfully synced all data for deal: {deal_name}" + Style.RESET_ALL)
+
+        except Exception as e:
+            print(Fore.RED + f"Error syncing deal data: {str(e)}" + Style.RESET_ALL)
             raise
 
 if __name__ == "__main__":

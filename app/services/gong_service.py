@@ -120,10 +120,12 @@ class GongService:
             return []
 
     def get_call_id(self, calls, call_title) -> str | None:
-        """Find a call by its title (case-insensitive)"""
+        """Find a call by matching any word in call_title against the call's title (case-insensitive)"""
+        call_title_tokens = set(call_title.lower().split())
+
         for call in calls:
-            title = call.get("title", "").lower()
-            if call_title.lower() in title or title in call_title.lower():
+            title_tokens = set(call.get("title", "").lower().split())
+            if call_title_tokens & title_tokens:
                 return str(call["id"])
         return None
 
