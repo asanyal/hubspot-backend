@@ -1,9 +1,8 @@
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 from urllib.parse import quote_plus
-from typing import Optional
 
-# Load .env file into os.environ
+# Load .env file
 load_dotenv()
 
 class Settings(BaseSettings):
@@ -28,9 +27,17 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 600
     TOP_K_CHUNKS: int = 10
 
-    # MongoDB Configuration
-    MONGO_URI: str = f"mongodb+srv://{quote_plus('atin')}:{quote_plus('Galileo@$123')}@cluster0.2dvzkmk.mongodb.net/spotlight_db?retryWrites=true&w=majority&appName=Cluster0"
+    # MongoDB Configuration via env vars
+    MONGO_USER: str
+    MONGO_PASS: str
+    MONGO_CLUSTER: str
     MONGO_DB_NAME: str = "spotlight_db"
+
+    @property
+    def MONGO_URI(self) -> str:
+        user = quote_plus(self.MONGO_USER)
+        password = quote_plus(self.MONGO_PASS)
+        return f"mongodb+srv://{user}:{password}@{self.MONGO_CLUSTER}/{self.MONGO_DB_NAME}?retryWrites=true&w=majority&appName=Cluster0"
 
     class Config:
         env_file = ".env"
