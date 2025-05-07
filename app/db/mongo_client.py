@@ -1,30 +1,23 @@
-import os
-import sys
-
-# Add the project root directory to Python path
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(project_root)
-
+import certifi
 from pymongo import MongoClient
 from app.core.config import settings
-import certifi
-import ssl
+import os
 
 class MongoConnection:
     _client = None
     _db = None
 
     @classmethod
-    def get_client(cls) -> MongoClient:
+    def get_client(cls):
         if cls._client is None:
-            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)  # Force TLS 1.2
-            cls._client = MongoClient(
-                settings.MONGO_URI,
-                ssl=True,
-                ssl_cert_reqs=ssl.CERT_REQUIRED,
-                ssl_ca_certs=certifi.where(),
-                ssl_context=ssl_context
-            )
+            # Use TLS with proper CA file (safe for Heroku + Atlas)
+            tls_args = {
+                "tls": True,
+                "tlsCAFile": certifi.where()
+            }
+
+            cls._client = MongoClient(settings.MONGO_URI, **tls_args)
+
         return cls._client
 
     @classmethod
@@ -35,7 +28,7 @@ class MongoConnection:
 
     @classmethod
     def close_connection(cls):
-        if cls._client is not None:
+        if cls._client:
             cls._client.close()
             cls._client = None
-            cls._db = None 
+            cls._db = None

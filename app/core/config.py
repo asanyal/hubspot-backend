@@ -37,7 +37,10 @@ class Settings(BaseSettings):
     def MONGO_URI(self) -> str:
         user = quote_plus(self.MONGO_USER)
         password = quote_plus(self.MONGO_PASS)
-        return "mongodb+srv://atin:Galileo%40%24123@cluster0.2dvzkmk.mongodb.net/spotlight_db?retryWrites=true&w=majority&tls=true&tlsAllowInvalidCertificates=false"
+        return (
+            f"mongodb+srv://{user}:{password}@{self.MONGO_CLUSTER}/"
+            f"{self.MONGO_DB_NAME}?retryWrites=true&w=majority&tls=true"
+        )
 
     class Config:
         env_file = ".env"
