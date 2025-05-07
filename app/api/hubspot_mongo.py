@@ -407,12 +407,15 @@ async def get_pipeline_summary():
         
         for deal in all_deals:
             stage = deal.get('stage', 'Unknown')
-            amount_str = deal.get('amount', '0')
+            amount_str = deal.get('amount')
             
-            # Convert amount string to float, handling currency format
+            # Convert amount string to float, handling currency format and None values
             try:
-                # Remove $ and commas, then convert to float
-                amount = float(amount_str.replace('$', '').replace(',', ''))
+                if amount_str is None:
+                    amount = 0
+                else:
+                    # Remove $ and commas, then convert to float
+                    amount = float(str(amount_str).replace('$', '').replace(',', ''))
             except (ValueError, TypeError):
                 amount = 0
             
