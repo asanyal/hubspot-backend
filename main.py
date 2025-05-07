@@ -6,10 +6,15 @@ from app.middleware.response_middleware import ResponseMiddleware
 
 app = FastAPI(title="HubSpot CRM API")
 
+allow_origins=[
+    "https://hubspot-gong-db-atin4.replit.app",
+    "http://localhost:3000"
+]
+
 # Configure CORS - moved to top and updated configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Your frontend URL
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
