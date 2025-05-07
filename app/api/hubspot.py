@@ -198,11 +198,6 @@ async def get_deal_timeline(
     """Get timeline data for a specific deal"""
     print(Fore.BLUE + f"#### Getting timeline for deal: {dealName}" + Style.RESET_ALL)
     try:
-        # Get browser ID from request headers
-        browser_id = request.headers.get("X-Browser-ID")
-        if not browser_id:
-            raise HTTPException(status_code=400, detail="Browser ID is required")
-        
         # measure the time it takes to get the timeline data
         start_time = time.time()
         timeline_data = hubspot_service.get_deal_timeline(dealName, include_content=True)
@@ -223,7 +218,6 @@ async def get_deal_timeline(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching deal timeline: {str(e)}")
-
 
 @router.get("/deal-info", response_model=Dict[str, Any])
 async def get_deal_info(dealName: str = Query(..., description="The name of the deal")):
@@ -393,15 +387,10 @@ async def get_contacts_and_champion(
             target_date = datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Please use YYYY-MM-DD format.")
-        
-        # Get browser ID from request headers
-        browser_id = request.headers.get("X-Browser-ID")
-        if not browser_id:
-            raise HTTPException(status_code=400, detail="Browser ID is required")
 
-        # Create composite cache key without browser_id
+        # Create composite cache key
         cache_key = f"{dealName}_{date}"
-        print(Fore.BLUE + f"Processing request for deal: {dealName}(client/browser: {browser_id})" + Style.RESET_ALL)
+        print(Fore.BLUE + f"Processing request for deal: {dealName}" + Style.RESET_ALL)
 
         # First check if we have the result in cache
         cached_result = gong_service.champion_cache.get(cache_key)
@@ -421,7 +410,7 @@ async def get_contacts_and_champion(
                 cached_result = None
             
             if cached_result and all(key in cached_result for key in ["contacts", "total_contacts", "champions_count"]):
-                print(Fore.BLUE + f"[CACHE] Returning cached result for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                print(Fore.BLUE + f"[CACHE] Returning cached result for deal {dealName}" + Style.RESET_ALL)
                 return cached_result
             else:
                 print(Fore.RED + f"[CACHE] Invalid cached result structure" + Style.RESET_ALL)
@@ -431,12 +420,12 @@ async def get_contacts_and_champion(
             print(Fore.RED + f"[CACHE] Missing or invalid cache entry for key: {cache_key}" + Style.RESET_ALL)
 
         # If no valid cached result, start the background task
-        print(Fore.BLUE + f"Creating background task for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+        print(Fore.BLUE + f"Creating background task for deal {dealName}" + Style.RESET_ALL)
         
         # Submit the task to the thread pool and wait for it to complete
         future = thread_pool.submit(
             process_champion_request_sync,
-            browser_id,
+            None,  # No browser ID needed
             dealName,
             target_date
         )
@@ -454,11 +443,11 @@ async def get_contacts_and_champion(
                 print(Fore.BLUE + f"Request successfully completed for deal {dealName}" + Style.RESET_ALL)
                 return result
             else:
-                print(Fore.RED + f"Invalid result structure for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+                print(Fore.RED + f"Invalid result structure for deal {dealName}" + Style.RESET_ALL)
                 raise HTTPException(status_code=500, detail="Invalid result structure")
                 
         except TimeoutError:
-            print(Fore.RED + f"Request timed out after 120 seconds for browser {browser_id}, deal {dealName}" + Style.RESET_ALL)
+            print(Fore.RED + f"Request timed out after 120 seconds for deal {dealName}" + Style.RESET_ALL)
             raise HTTPException(
                 status_code=504, 
                 detail="Request timed out after 120 seconds. The operation is still processing in the background."
@@ -622,18 +611,10 @@ async def load_customer_transcripts(
 ):
     """Load customer transcripts for a given deal and date range into cache"""
     try:
-        # Get browser ID from request headers
-        browser_id = request.headers.get("X-Browser-ID")
-        if not browser_id:
-            raise HTTPException(status_code=400, detail="Browser ID is required")
-
         # Get company name from deal name
         company_name = extract_company_name(dealName)
         if company_name == "Unknown Company":
             raise HTTPException(status_code=400, detail="Could not extract company name from deal name")
-
-        # Set the company name in the conversation context
-        conversation_context.set_company_name(browser_id, company_name)
 
         # Parse dates
         try:
@@ -715,19 +696,10 @@ async def load_customer_transcripts(
 async def ask_customer(request: Request, question: QuestionRequest):
     """Ask a question about customer transcripts"""
     try:
-        # Get browser ID from request headers
-        browser_id = request.headers.get("X-Browser-ID")
-        if not browser_id:
-            raise HTTPException(status_code=400, detail="Browser ID is required")
-
-        # Try to get company name from context first
-        company_name = conversation_context.get_company_name(browser_id)
-        
-        # If not in context, try to extract from query
-        if not company_name:
-            company_name = extract_company_name(question.query)
-            if company_name == "Unknown Company":
-                raise HTTPException(status_code=400, detail="Could not identify company from query and no previous context found")
+        # Try to get company name from query
+        company_name = extract_company_name(question.query)
+        if company_name == "Unknown Company":
+            raise HTTPException(status_code=400, detail="Could not identify company from query")
 
         # Get all cached chunks for the company
         all_chunks = []

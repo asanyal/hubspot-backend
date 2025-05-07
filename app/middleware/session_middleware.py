@@ -14,14 +14,9 @@ class SessionMiddleware(BaseHTTPMiddleware):
         # Debug print the path
         print(Fore.BLUE + f"Request path: {request.url.path}" + Style.RESET_ALL)
         
-        # Skip session validation for health check and transcript endpoints
-        if any(request.url.path.endswith(path) for path in [
-            "/health",
-            "/load-customer-transcripts",
-            "/ask-customer"
-        ]):
-            print(Fore.GREEN + f"Skipping session validation for {request.url.path}" + Style.RESET_ALL)
-            return await call_next(request)
+        # Skip session validation for all endpoints
+        print(Fore.GREEN + f"Skipping session validation for {request.url.path}" + Style.RESET_ALL)
+        return await call_next(request)
 
         # Get browser ID from request headers
         browser_id = request.headers.get("X-Browser-ID")
