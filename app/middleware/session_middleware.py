@@ -19,7 +19,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
             "/health",
             "/load-customer-transcripts",
             "/ask-customer"
-        ]):
+        ]) or request.method == "OPTIONS":
             print(Fore.GREEN + f"Skipping session validation for {request.url.path}" + Style.RESET_ALL)
             return await call_next(request)
 

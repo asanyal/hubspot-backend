@@ -6,13 +6,15 @@ from app.middleware.response_middleware import ResponseMiddleware
 
 app = FastAPI(title="HubSpot CRM API")
 
-# Configure CORS
+# Configure CORS - moved to top and updated configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],  # Your frontend URL
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Add session middleware
