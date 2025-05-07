@@ -17,8 +17,19 @@ class MongoConnection:
     @classmethod
     def get_client(cls) -> MongoClient:
         if cls._client is None:
+            tls_args = {}
+
+            # Use certifi only if running on Heroku (or production)
+            if os.getenv("DYNO"):  # Heroku sets DYNO in env
+                import certifi
+                tls_args = {
+                    "tls": True,
+                    "tlsCAFile": certifi.where()
+                }
+
             cls._client = MongoClient(
-                settings.MONGO_URI
+                settings.MONGO_URI,
+                **tls_args
             )
         return cls._client
 
