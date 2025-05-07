@@ -27,15 +27,19 @@ app.include_router(hubspot_mongo.router, prefix="/api/hubspot/v2", tags=["hubspo
 
 if __name__ == "__main__":
     import uvicorn
+    import os
+
+    port = int(os.environ.get("PORT", 8000))  # <-- this is key for Heroku
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
-        workers=8,  # Number of worker processes
-        loop="uvloop",  # Use uvloop for better performance
-        limit_concurrency=1000,  # Maximum number of connections
-        backlog=2048,  # Maximum number of pending connections
-        timeout_keep_alive=30,  # Keep-alive timeout
+        port=port,
+        reload=False,       # Turn off reload in production
+        workers=1,          # Heroku dynos don't need 8 workers unless you're using gunicorn
+        loop="uvloop",
+        limit_concurrency=1000,
+        backlog=2048,
+        timeout_keep_alive=30,
         access_log=True
     )
