@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import Counter
 from bson import ObjectId
 from app.repositories.deal_info_repository import DealInfoRepository
@@ -8,6 +8,7 @@ from app.repositories.deal_insights_repository import DealInsightsRepository
 from app.repositories.deal_timeline_repository import DealTimelineRepository
 from app.repositories.meeting_insights_repository import MeetingInsightsRepository
 from app.repositories.company_overview_repository import CompanyOverviewRepository
+from app.services.data_sync_service import DataSyncService
 from colorama import Fore, Style, init
 
 init()
@@ -18,6 +19,7 @@ deal_insights_repo = DealInsightsRepository()
 deal_timeline_repo = DealTimelineRepository()
 meeting_insights_repo = MeetingInsightsRepository()
 company_overview_repo = CompanyOverviewRepository()
+sync_service = DataSyncService()
 
 def convert_mongo_doc(doc: Dict) -> Dict:
     """Convert MongoDB document to JSON-serializable format"""
@@ -460,4 +462,49 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         import traceback
         traceback.print_exc()
         # Return a graceful response instead of raising an error
-        return {"overview": "No company info available"} 
+        return {"overview": "No company info available"}
+
+@router.post("/sync", status_code=200)
+async def sync_data(
+    epoch_days: Optional[int] = Query(None, description="Number of days ago to start syncing from"),
+    stage: Optional[str] = Query(None, description="Specific stage to sync deals from"),
+    deal: Optional[str] = Query(None, description="Specific deal name to sync")
+):
+    """
+    Sync data from HubSpot and Gong. Can be used in three ways:
+    1. Sync all deals from today: /sync
+    2. Sync all deals from N days ago: /sync?epoch_days=N
+    3. Sync deals from a specific stage: /sync?stage="Stage Name"
+    4. Sync a specific deal: /sync?deal="Deal Name"
+    
+    Parameters can be combined, e.g., /sync?stage="Stage Name"&epoch_days=2
+    """
+    try:
+        # Calculate epoch0 if epoch_days is provided
+        epoch0 = None
+        if epoch_days is not None:
+            today = datetime.now()
+            epoch_date = today - timedelta(days=epoch_days)
+            epoch0 = epoch_date.strftime("%Y-%m-%d")
+
+        if deal:
+            # Sync single deal
+            sync_service.sync_single_deal(
+                deal_name=deal,
+                epoch0=epoch0
+            )
+            return {"status": "success", "message": f"Successfully synced deal: {deal}"}
+        else:
+            # Sync all deals or deals from specific stage
+            stage_to_use = stage if stage else "all"
+            sync_service.sync(
+                stage=stage_to_use,
+                epoch0=epoch0
+            )
+            return {"status": "success", "message": f"Successfully synced deals for stage: {stage_to_use}"}
+
+    except Exception as e:
+        print(Fore.RED + f"Error in sync endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error syncing data: {str(e)}") 
