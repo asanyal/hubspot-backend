@@ -36,9 +36,6 @@ class HubspotService:
             from app.services.gong_service import GongService
             self.gong_service = GongService()
             
-            # Initialize engagement cache
-            self._engagement_cache = {}
-            
             # Initialize deals cache
             self._deals_cache = None
             self._deals_cache_timestamp = None
@@ -591,14 +588,6 @@ class HubspotService:
             
             print(Fore.CYAN + f"Found {len(engagement_ids)} activities for this deal" + Style.RESET_ALL)
             
-            # Initialize or clear the cache for this deal
-            if not hasattr(self, '_engagement_cache'):
-                self._engagement_cache = {}
-            
-            deal_cache_key = f"deal_{deal_id}"
-            print(Fore.CYAN + f"Adding this deal to cache: {deal_cache_key}" + Style.RESET_ALL)
-            self._engagement_cache[deal_cache_key] = {}
-            
             timeline_events = []
             start_engagement_date = None
             latest_engagement_date = None
@@ -721,19 +710,6 @@ class HubspotService:
                     # Prepare content preview
                     content_preview = content[:150] + "..." if len(content) > 150 else content
                     
-                    # Store in thread-safe way
-                    cache_data = {
-                        "type": display_type,
-                        "subject": subject,
-                        "date_str": date_time.strftime('%Y-%m-%d'),
-                        "time_str": date_time.strftime('%H:%M'),
-                        "content": content,
-                        "sentiment": sentiment,
-                        "content_preview": content_preview,
-                        "buyer_intent": buyer_intent["intent"],
-                        "buyer_intent_explanation": buyer_intent["explanation"]
-                    }
-                    
                     # Create event object
                     event = {
                         "id": event_id,
@@ -751,9 +727,7 @@ class HubspotService:
                     
                     return {
                         "event": event, 
-                        "date_time": date_time,
-                        "cache_data": cache_data,
-                        "event_id": event_id
+                        "date_time": date_time
                     }
                 except Exception as e:
                     print(Fore.RED + f"[ERROR][get_deal_timeline] Error processing engagement {eng_id}: {str(e)}" + Style.RESET_ALL)
@@ -762,8 +736,6 @@ class HubspotService:
                     return None
             
             # Use thread pool to process engagements in parallel
-            cache_updates = {}
-            
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 future_to_engagement = {
                     executor.submit(fetch_and_process_engagement, eng_id): eng_id 
@@ -784,15 +756,9 @@ class HubspotService:
                             start_engagement_date = date_time
                         if latest_engagement_date is None or date_time > latest_engagement_date:
                             latest_engagement_date = date_time
-                            
-                        # Store cache updates for applying after processing
-                        cache_updates[result["event_id"]] = result["cache_data"]
                     except Exception as e:
                         print(Fore.RED + f"[ERROR][get_deal_timeline] Error processing future result: {str(e)}" + Style.RESET_ALL)
                         continue
-            
-            # Apply cache updates
-            self._engagement_cache[deal_cache_key].update(cache_updates)
             
             # Sort events by date
             timeline_events.sort(key=lambda x: (x["date_str"], x["time_str"]))
@@ -913,27 +879,6 @@ class HubspotService:
                     return deal_id
 
         return None
-
-    def get_event_content(self, deal_id: str, eng_id: str) -> Dict[str, Any]:
-        """Get content for a specific event using just the engagement ID"""
-        deal_cache_key = f"deal_{deal_id}"
-        
-        if not hasattr(self, '_engagement_cache') or not self._engagement_cache:
-            return {"error": "No cached events found. Key: " + deal_cache_key}
-        
-        deal_cache = self._engagement_cache.get(deal_cache_key, {})
-        if not deal_cache:
-            return {"error": f"No cached events found for key {deal_cache_key}"}
-        
-        # Find event with this engagement ID prefix
-        for cached_event_id, cached_event_data in deal_cache.items():
-            # event_id format: "{eng_id}_{timestamp}"
-            cached_eng_id = cached_event_id.split('_')[0]
-            
-            if cached_eng_id == eng_id:
-                return cached_event_data
-        
-        return {"error": f"Event with engagement ID {eng_id} not found"}
 
     def get_deal_activities_count(self, deal_name: str) -> int:
         """Get the count of activities for a specific deal"""
