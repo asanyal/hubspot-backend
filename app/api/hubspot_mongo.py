@@ -489,6 +489,7 @@ async def sync_data(
 
         if deal:
             # Sync single deal
+            print(Fore.YELLOW + f"Syncing deal: {deal} from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
             sync_service.sync_single_deal(
                 deal_name=deal,
                 epoch0=epoch0
@@ -497,6 +498,7 @@ async def sync_data(
         else:
             # Sync all deals or deals from specific stage
             stage_to_use = stage if stage else "all"
+            print(Fore.YELLOW + f"Syncing deals (or deals) from stage: {stage_to_use}) from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
             sync_service.sync(
                 stage=stage_to_use,
                 epoch0=epoch0

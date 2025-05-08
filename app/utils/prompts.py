@@ -179,8 +179,9 @@ buyer_intent_prompt = """
 """
 
 pricing_concerns_prompt = """
-    analyze the transcripts below and see if there are any pricing concerns.
-    return a JSON with the following fields:
+    Analyze the transcripts below and see if there are any pricing concerns.
+    Note: Galileo is the seller, not the buyer. Only analyze the buyer's concerns.
+    Return a JSON with the following fields:
     - pricing_concerns: true or false (use lowercase, JSON boolean values)
     - explanation: A one-line explanation on why this person has pricing concerns (or not)
 
@@ -192,7 +193,7 @@ pricing_concerns_prompt = """
 
 no_decision_maker_prompt = """
     Your task is to analyze the transcripts below and see if there are any decision makers.
-
+    Note: Galileo is the seller, not the buyer. Only analyze the buyer's concerns.
     Analyze at the Background & Team Context from the transcripts
     - If the analysis yields that any of the speakers is a Manager of teams, Director, VP, C-level or Cofounder, then they are a decision maker.
     - If the analysis yields that the they are a developer (engineer), then they are not a decision maker.
@@ -210,7 +211,7 @@ no_decision_maker_prompt = """
 already_has_vendor_prompt = """
     analyze the transcripts below and see if the buyer already has a vendor.
     Vendors can be competitors or tools that are being built internally by the buyer.
-
+    Note: Galileo is the seller, not the buyer. Only analyze the buyer's concerns.
     Competitors of Galileo are:
     - Braintrust
     - LangSmith

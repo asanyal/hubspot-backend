@@ -20,6 +20,7 @@ def test_sync(stage: str = "all", epoch0: str = None):
     if epoch0 is None:
         epoch0 = datetime.now().strftime("%Y-%m-%d")
         
+    print(Fore.YELLOW + f"\nSyncing deals (or deals from stage: {stage}) from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
     # Initialize the service
     sync_service = DataSyncService()
 
@@ -39,7 +40,7 @@ def test_sync_single_deal(deal_name: str, epoch0: str = None):
     sync_service = DataSyncService()
 
     # Set up test parameters
-    print(Fore.YELLOW + f"\nTesting sync for single deal: {deal_name}" + Style.RESET_ALL)
+    print(Fore.YELLOW + f"\nSyncing deal: {deal_name} from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
 
     try:
         sync_service.sync_single_deal(
