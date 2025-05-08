@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, BackgroundTasks
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from collections import Counter
@@ -10,6 +10,8 @@ from app.repositories.meeting_insights_repository import MeetingInsightsReposito
 from app.repositories.company_overview_repository import CompanyOverviewRepository
 from app.services.data_sync_service import DataSyncService
 from colorama import Fore, Style, init
+import threading
+import queue
 
 init()
 
@@ -20,6 +22,11 @@ deal_timeline_repo = DealTimelineRepository()
 meeting_insights_repo = MeetingInsightsRepository()
 company_overview_repo = CompanyOverviewRepository()
 sync_service = DataSyncService()
+
+# Store for tracking sync jobs
+sync_jobs = {}
+sync_job_queue = queue.Queue()
+active_threads = {}
 
 def convert_mongo_doc(doc: Dict) -> Dict:
     """Convert MongoDB document to JSON-serializable format"""
@@ -464,20 +471,54 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         # Return a graceful response instead of raising an error
         return {"overview": "No company info available"}
 
-@router.post("/sync", status_code=200)
+def run_sync_job(job_id: str, deal: Optional[str], stage: Optional[str], epoch0: Optional[str]):
+    """Background function to run sync operations"""
+    try:
+        if deal:
+            print(Fore.YELLOW + f"Starting sync job {job_id}: Syncing deal {deal} from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
+            sync_service.sync_single_deal(
+                deal_name=deal,
+                epoch0=epoch0
+            )
+            sync_jobs[job_id]["status"] = "completed"
+            sync_jobs[job_id]["message"] = f"Successfully synced deal: {deal}"
+        else:
+            stage_to_use = stage if stage else "all"
+            print(Fore.YELLOW + f"Starting sync job {job_id}: Syncing deals from stage {stage_to_use} from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
+            sync_service.sync(
+                stage=stage_to_use,
+                epoch0=epoch0
+            )
+            sync_jobs[job_id]["status"] = "completed"
+            sync_jobs[job_id]["message"] = f"Successfully synced deals for stage: {stage_to_use}"
+    except Exception as e:
+        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
+        sync_jobs[job_id]["status"] = "failed"
+        sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
+        sync_jobs[job_id]["error"] = str(e)
+    finally:
+        # Clean up thread reference
+        if job_id in active_threads:
+            del active_threads[job_id]
+
+@router.post("/sync", status_code=202)
 async def sync_data(
+    background_tasks: BackgroundTasks,
     epoch_days: Optional[int] = Query(None, description="Number of days ago to start syncing from"),
     stage: Optional[str] = Query(None, description="Specific stage to sync deals from"),
     deal: Optional[str] = Query(None, description="Specific deal name to sync")
 ):
     """
-    Sync data from HubSpot and Gong. Can be used in three ways:
+    Start a background sync job. Returns immediately with a job ID that can be used to check status.
+    Can be used in three ways:
     1. Sync all deals from today: /sync
     2. Sync all deals from N days ago: /sync?epoch_days=N
     3. Sync deals from a specific stage: /sync?stage="Stage Name"
     4. Sync a specific deal: /sync?deal="Deal Name"
     
     Parameters can be combined, e.g., /sync?stage="Stage Name"&epoch_days=2
+    
+    Use the /sync/status/{job_id} endpoint to check the status of the sync job.
     """
     try:
         # Calculate epoch0 if epoch_days is provided
@@ -487,26 +528,113 @@ async def sync_data(
             epoch_date = today - timedelta(days=epoch_days)
             epoch0 = epoch_date.strftime("%Y-%m-%d")
 
-        if deal:
-            # Sync single deal
-            print(Fore.YELLOW + f"Syncing deal: {deal} from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
-            sync_service.sync_single_deal(
-                deal_name=deal,
-                epoch0=epoch0
-            )
-            return {"status": "success", "message": f"Successfully synced deal: {deal}"}
-        else:
-            # Sync all deals or deals from specific stage
-            stage_to_use = stage if stage else "all"
-            print(Fore.YELLOW + f"Syncing deals (or deals) from stage: {stage_to_use}) from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
-            sync_service.sync(
-                stage=stage_to_use,
-                epoch0=epoch0
-            )
-            return {"status": "success", "message": f"Successfully synced deals for stage: {stage_to_use}"}
+        # Generate a unique job ID
+        job_id = f"sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
+        
+        # Initialize job status
+        sync_jobs[job_id] = {
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "deal": deal,
+            "stage": stage,
+            "epoch0": epoch0,
+            "cancelled": False
+        }
+
+        # Start the sync job in a background thread
+        thread = threading.Thread(
+            target=run_sync_job,
+            args=(job_id, deal, stage, epoch0)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        # Store thread reference for potential cancellation
+        active_threads[job_id] = thread
+
+        return {
+            "status": "accepted",
+            "message": "Sync job started",
+            "job_id": job_id
+        }
 
     except Exception as e:
-        print(Fore.RED + f"Error in sync endpoint: {str(e)}" + Style.RESET_ALL)
+        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error syncing data: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
+
+@router.get("/sync/status/{job_id}", status_code=200)
+async def get_sync_status(job_id: str):
+    """
+    Get the status of a sync job
+    """
+    if job_id not in sync_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job = sync_jobs[job_id]
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "started_at": job["started_at"],
+        "deal": job["deal"],
+        "stage": job["stage"],
+        "epoch0": job["epoch0"],
+        "message": job.get("message"),
+        "error": job.get("error"),
+        "cancelled": job.get("cancelled", False)
+    }
+
+@router.get("/sync/jobs", status_code=200)
+async def list_sync_jobs(
+    status: Optional[str] = Query(None, description="Filter jobs by status (running/completed/failed)")
+):
+    """
+    List all sync jobs, optionally filtered by status
+    """
+    jobs = []
+    for job_id, job in sync_jobs.items():
+        if status and job["status"] != status:
+            continue
+            
+        jobs.append({
+            "job_id": job_id,
+            "status": job["status"],
+            "started_at": job["started_at"],
+            "deal": job["deal"],
+            "stage": job["stage"],
+            "epoch0": job["epoch0"],
+            "message": job.get("message"),
+            "error": job.get("error"),
+            "cancelled": job.get("cancelled", False)
+        })
+    
+    return {
+        "total_jobs": len(jobs),
+        "jobs": jobs
+    }
+
+@router.post("/sync/cancel/{job_id}", status_code=200)
+async def cancel_sync_job(job_id: str):
+    """
+    Cancel a running sync job
+    """
+    if job_id not in sync_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job = sync_jobs[job_id]
+    if job["status"] != "running":
+        raise HTTPException(status_code=400, detail=f"Cannot cancel job in {job['status']} status")
+    
+    # Mark job as cancelled
+    job["cancelled"] = True
+    job["status"] = "cancelled"
+    job["message"] = "Job was cancelled by user"
+    
+    # Note: We can't actually stop the thread, but we've marked it as cancelled
+    # The sync service should check this flag periodically and stop if cancelled
+    
+    return {
+        "status": "success",
+        "message": f"Job {job_id} marked for cancellation"
+    } 
