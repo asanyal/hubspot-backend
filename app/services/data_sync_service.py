@@ -52,7 +52,7 @@ class DataSyncService:
                 current_date = datetime.strptime(epoch0, "%Y-%m-%d")
                 end_date = datetime.strptime(datetime.now().strftime("%Y-%m-%d"), "%Y-%m-%d")
 
-                print(Fore.YELLOW + f"\n### Syncing Meeting Data for: {deal_name} from {epoch0} to {today} ###" + Style.RESET_ALL)
+                print(Fore.YELLOW + f"\n### Syncing Meeting Data for: {deal_name} ###" + Style.RESET_ALL)
 
                 while current_date <= end_date:
                     current_date_str = current_date.strftime("%Y-%m-%d")
