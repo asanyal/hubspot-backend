@@ -43,6 +43,9 @@ company_name_prompt = """
     - "Deutsche Bank" -> "DB"
     - "Deutsche Telekom" -> "DT"
     - "FreshWorks" -> "FW"
+
+    Some companies have multiple names:
+    - "DemandMatrix" -> "DemandBase"
     
     Examples:
     - "Notable - New Deal" -> "Notable"

@@ -49,9 +49,8 @@ class DataSyncService:
                 self.sync_global_deal_data(deal_name, epoch0)
                 self.sync_company_overviews(deal_name)
 
-                today = datetime.now().strftime("%Y-%m-%d")
                 current_date = datetime.strptime(epoch0, "%Y-%m-%d")
-                end_date = datetime.strptime(today, "%Y-%m-%d")
+                end_date = datetime.strptime(datetime.now().strftime("%Y-%m-%d"), "%Y-%m-%d")
 
                 print(Fore.YELLOW + f"\n### Syncing Meeting Data for: {deal_name} from {epoch0} to {today} ###" + Style.RESET_ALL)
 
@@ -249,8 +248,7 @@ class DataSyncService:
             if not call_id:
                 return
 
-            print(Fore.GREEN + f"A meeting was found for {deal_name} on {call_date}. Proceeding with sync..." + Style.RESET_ALL)
-
+            print(Fore.GREEN + f"Meeting found for {deal_name} on {call_date}. Proceeding with sync..." + Style.RESET_ALL)
             print(Fore.GREEN + f"Getting buyer intent for {deal_name} on {call_date}..." + Style.RESET_ALL)
             buyer_intent = self.gong_service.get_buyer_intent(deal_name, call_date, "Galileo")
 

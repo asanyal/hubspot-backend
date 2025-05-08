@@ -23,9 +23,8 @@ def test_sync_single_deal(deal_name, epoch0):
     sync_service = DataSyncService()
 
     # Set up test parameters
-
     print(Fore.YELLOW + f"\nTesting sync for single deal: {deal_name}" + Style.RESET_ALL)
-    
+
     try:
         sync_service.sync_single_deal(
             deal_name=deal_name,
@@ -37,6 +36,5 @@ def test_sync_single_deal(deal_name, epoch0):
         raise
 
 if __name__ == "__main__":
-    # Uncomment the test you want to run
     test_sync("2. Needs Analysis & Solution Mapping", "2025-02-01")
-    # test_sync_single_deal("Deutsche Telekom - 001", "2025-02-01")
+    test_sync_single_deal("DemandMatrix LLC - New Deal", "2025-03-01")
