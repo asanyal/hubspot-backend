@@ -573,17 +573,29 @@ async def get_sync_status(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     
     job = sync_jobs[job_id]
-    return {
+    response = {
         "job_id": job_id,
         "status": job["status"],
         "started_at": job["started_at"],
-        "deal": job["deal"],
-        "stage": job["stage"],
         "epoch0": job["epoch0"],
         "message": job.get("message"),
         "error": job.get("error"),
         "cancelled": job.get("cancelled", False)
     }
+    
+    # Add job-specific fields based on job type
+    if job.get("type") == "force_meeting_insights":
+        response.update({
+            "deal_names": job.get("deal_names", []),
+            "epoch_days": job.get("epoch_days")
+        })
+    else:
+        response.update({
+            "deal": job.get("deal"),
+            "stage": job.get("stage")
+        })
+    
+    return response
 
 @router.get("/sync/jobs", status_code=200)
 async def list_sync_jobs(
