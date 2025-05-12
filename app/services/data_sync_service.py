@@ -1,6 +1,7 @@
 import os
 import sys
 import asyncio
+import json
 
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -247,14 +248,37 @@ class DataSyncService:
             force_update: If True, will overwrite existing meeting insights data
         """
         try:
-            # Get meetings for the deal on the specified date
+            print(Fore.YELLOW + f"\n=== Starting Meeting Insights Sync for {deal_name} on {date_str} ===" + Style.RESET_ALL)
+            print(Fore.YELLOW + f"Force Update: {force_update}" + Style.RESET_ALL)
+            
+            # First, try to find meetings in Gong for this date
+            print(Fore.BLUE + f"Checking Gong API for meetings on {date_str}..." + Style.RESET_ALL)
+            calls = self.gong_service.list_calls(date_str)
+            print(Fore.BLUE + f"Found {len(calls)} total calls in Gong for {date_str}" + Style.RESET_ALL)
+            
+            # Extract company name from deal name
+            company_name = extract_company_name(deal_name)
+            print(Fore.MAGENTA + f"Looking for meetings matching company name: {company_name}" + Style.RESET_ALL)
+            
+            # Try to find a matching call
+            call_id = self.gong_service.get_call_id(calls, company_name)
+            if call_id:
+                print(Fore.GREEN + f"Found matching call in Gong: {call_id}" + Style.RESET_ALL)
+            else:
+                print(Fore.YELLOW + f"No matching call found in Gong for {company_name} on {date_str}" + Style.RESET_ALL)
+            
+            # Get meetings for the deal on the specified date from MongoDB
+            print(Fore.BLUE + f"Checking MongoDB for existing meetings..." + Style.RESET_ALL)
             meetings = self.meeting_insights_repo.find_by_deal_and_date(deal_name, date_str)
             
             if not meetings:
-                print(Fore.YELLOW + f"No meetings found for deal {deal_name} on {date_str}" + Style.RESET_ALL)
+                print(Fore.YELLOW + f"No meetings found in MongoDB for deal {deal_name} on {date_str}" + Style.RESET_ALL)
+                if call_id:
+                    print(Fore.BLUE + f"But we found a call in Gong! We should create a new meeting record..." + Style.RESET_ALL)
+                    # TODO: We should probably create a new meeting record here
                 return
                 
-            print(Fore.YELLOW + f"Found {len(meetings)} meetings for deal {deal_name} on {date_str}" + Style.RESET_ALL)
+            print(Fore.YELLOW + f"Found {len(meetings)} meetings in MongoDB for deal {deal_name} on {date_str}" + Style.RESET_ALL)
             
             # Get meeting insights for each meeting
             for meeting in meetings:
@@ -264,7 +288,11 @@ class DataSyncService:
                     continue
                     
                 try:
+                    print(Fore.MAGENTA + f"\nProcessing meeting {meeting_id}:" + Style.RESET_ALL)
+                    print(Fore.MAGENTA + f"Current meeting data: {json.dumps(meeting, indent=2)}" + Style.RESET_ALL)
+                    
                     # Get meeting insights from Gong
+                    print(Fore.BLUE + "Fetching fresh insights from Gong API..." + Style.RESET_ALL)
                     insights = self.gong_service.get_meeting_insights(meeting_id)
                     
                     if insights:
@@ -272,19 +300,29 @@ class DataSyncService:
                         insights["deal_name"] = deal_name
                         insights["date"] = date_str
                         
+                        # Log buyer intent data
+                        if "buyer_intent" in insights:
+                            print(Fore.GREEN + "\nBuyer Intent Data:" + Style.RESET_ALL)
+                            print(Fore.GREEN + f"Intent: {insights['buyer_intent'].get('intent', 'N/A')}" + Style.RESET_ALL)
+                            print(Fore.GREEN + f"Explanation: {insights['buyer_intent'].get('explanation', 'N/A')}" + Style.RESET_ALL)
+                        else:
+                            print(Fore.YELLOW + "No buyer intent data found in insights" + Style.RESET_ALL)
+                        
                         # Store insights in MongoDB
                         if force_update:
+                            print(Fore.BLUE + f"Force updating meeting insights in MongoDB..." + Style.RESET_ALL)
                             self.meeting_insights_repo.force_update_one(
                                 {"meeting_id": meeting_id},
                                 insights
                             )
-                            print(Fore.GREEN + f"Force updated meeting insights for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
+                            print(Fore.GREEN + f"Successfully force updated meeting insights for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
                         else:
+                            print(Fore.BLUE + f"Updating meeting insights in MongoDB..." + Style.RESET_ALL)
                             self.meeting_insights_repo.update_one(
                                 {"meeting_id": meeting_id},
                                 insights
                             )
-                            print(Fore.GREEN + f"Updated meeting insights for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
+                            print(Fore.GREEN + f"Successfully updated meeting insights for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
                     else:
                         print(Fore.YELLOW + f"No insights found for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
                         

@@ -2,7 +2,7 @@ from colorama import Fore, Style, init
 
 import requests
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Any
@@ -122,9 +122,11 @@ class GongService:
     def get_call_id(self, calls, company_name) -> str | None:
         """Find a call by matching any word in call_title against the call's title (case-insensitive)"""
         company_name_tokens = set(company_name.lower().split())
+        print(Fore.RED + f"Company name tokens: {company_name_tokens}" + Style.RESET_ALL)
 
         for call in calls:
             title_tokens = set(call.get("title", "").lower().split())
+            print(Fore.RED + f"Title tokens: {title_tokens}" + Style.RESET_ALL)
             if company_name_tokens & title_tokens:
                 return str(call["id"])
         return None
@@ -673,6 +675,111 @@ class GongService:
     def get_cached_champion_deals(self) -> List[str]:
         """Returns a list of deal names currently in the cache"""
         return self.champion_cache.keys()
+
+    def get_meeting_insights(self, meeting_id: str) -> Dict:
+        """
+        Get meeting insights from Gong API for a specific meeting.
+        This method always makes a fresh API call to ensure we get the latest data.
+        
+        Args:
+            meeting_id: The Gong meeting ID
+            
+        Returns:
+            Dict containing meeting insights including buyer intent and champion analysis
+        """
+        try:
+            print(Fore.BLUE + f"\n=== Fetching Fresh Meeting Insights from Gong API ===" + Style.RESET_ALL)
+            print(Fore.BLUE + f"Meeting ID: {meeting_id}" + Style.RESET_ALL)
+            
+            # Get meeting data from Gong API
+            url = f"https://us-5738.api.gong.io/v2/calls/extensive"
+            headers = {'Content-Type': 'application/json'}
+            payload = {
+                "filter": {
+                    "callIds": [str(meeting_id)]
+                },
+                "contentSelector": {
+                    "exposedFields": {
+                        "parties": True,
+                        "interaction": {
+                            "transcript": True,
+                            "topics": True
+                        }
+                    }
+                }
+            }
+            
+            print(Fore.BLUE + "Making API call to Gong..." + Style.RESET_ALL)
+            response = requests.post(
+                url,
+                auth=(self.access_key, self.client_secret),
+                headers=headers,
+                json=payload
+            )
+            
+            if not response.ok:
+                print(Fore.RED + f"Error fetching meeting data from Gong: {response.status_code}" + Style.RESET_ALL)
+                print(Fore.RED + f"Response: {response.text}" + Style.RESET_ALL)
+                return None
+                
+            meeting_data = response.json()
+            calls = meeting_data.get("calls", [])
+            
+            if not calls:
+                print(Fore.YELLOW + f"No meeting data found for ID: {meeting_id}" + Style.RESET_ALL)
+                return None
+                
+            call = calls[0]  # Get the first (and should be only) call
+            
+            # Extract company name from call title
+            company_name = extract_company_name(call.get("title", ""))
+            print(Fore.MAGENTA + f"Extracted company name from call title: {company_name}" + Style.RESET_ALL)
+            
+            # Extract transcript and topics
+            transcript = ""
+            topics = []
+            for part in call.get("interaction", {}).get("transcript", []):
+                if "sentences" in part:
+                    for sentence in part["sentences"]:
+                        transcript += sentence.get("text", "") + " "
+                if "topic" in part:
+                    topics.append(part["topic"])
+            
+            # Get buyer intent analysis
+            print(Fore.BLUE + "Analyzing buyer intent from transcript..." + Style.RESET_ALL)
+            buyer_intent = self.get_buyer_intent_json(
+                transcript,
+                "Atin Sanyal",  # TODO: Get actual seller name
+                call.get("startTime", "").split("T")[0]  # Extract date from startTime
+            )
+            
+            # Get champion analysis
+            print(Fore.BLUE + "Analyzing champions from transcript..." + Style.RESET_ALL)
+            champions = self.get_champions(
+                call.get("title", ""),
+                datetime.strptime(call.get("startTime", "").split("T")[0], "%Y-%m-%d")
+            )
+            
+            # Compile insights
+            insights = {
+                "meeting_id": meeting_id,
+                "meeting_title": call.get("title", ""),
+                "meeting_date": call.get("startTime", "").split("T")[0],
+                "buyer_intent": buyer_intent,
+                "champion_analysis": champions,
+                "topics": topics,
+                "transcript": transcript,
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            }
+            
+            print(Fore.GREEN + "Successfully fetched and analyzed meeting insights" + Style.RESET_ALL)
+            return insights
+            
+        except Exception as e:
+            print(Fore.RED + f"Error in get_meeting_insights: {str(e)}" + Style.RESET_ALL)
+            import traceback
+            traceback.print_exc()
+            return None
 
 if __name__ == "__main__":
     gong_service = GongService()

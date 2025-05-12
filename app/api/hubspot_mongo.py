@@ -570,32 +570,43 @@ async def get_sync_status(job_id: str):
     Get the status of a sync job
     """
     if job_id not in sync_jobs:
+        print(Fore.RED + f"Job not found: {job_id}" + Style.RESET_ALL)
         raise HTTPException(status_code=404, detail="Job not found")
     
     job = sync_jobs[job_id]
-    response = {
-        "job_id": job_id,
-        "status": job["status"],
-        "started_at": job["started_at"],
-        "epoch0": job["epoch0"],
-        "message": job.get("message"),
-        "error": job.get("error"),
-        "cancelled": job.get("cancelled", False)
-    }
+    print(Fore.YELLOW + f"Job data: {job}" + Style.RESET_ALL)  # Debug log
     
-    # Add job-specific fields based on job type
-    if job.get("type") == "force_meeting_insights":
-        response.update({
-            "deal_names": job.get("deal_names", []),
-            "epoch_days": job.get("epoch_days")
-        })
-    else:
-        response.update({
-            "deal": job.get("deal"),
-            "stage": job.get("stage")
-        })
-    
-    return response
+    try:
+        response = {
+            "job_id": job_id,
+            "status": job.get("status", "unknown"),
+            "started_at": job.get("started_at"),
+            "epoch0": job.get("epoch0"),
+            "message": job.get("message"),
+            "error": job.get("error"),
+            "cancelled": job.get("cancelled", False),
+            "type": job.get("type", "unknown")  # Add type to response for debugging
+        }
+        
+        # Add job-specific fields based on job type
+        if job.get("type") == "force_meeting_insights":
+            response.update({
+                "deal_names": job.get("deal_names", []),
+                "epoch_days": job.get("epoch_days")
+            })
+        else:
+            response.update({
+                "deal": job.get("deal"),
+                "stage": job.get("stage")
+            })
+        
+        print(Fore.GREEN + f"Response: {response}" + Style.RESET_ALL)  # Debug log
+        return response
+        
+    except Exception as e:
+        print(Fore.RED + f"Error processing job status: {str(e)}" + Style.RESET_ALL)
+        print(Fore.RED + f"Job data: {job}" + Style.RESET_ALL)
+        raise HTTPException(status_code=500, detail=f"Error processing job status: {str(e)}")
 
 @router.get("/sync/jobs", status_code=200)
 async def list_sync_jobs(
@@ -609,17 +620,29 @@ async def list_sync_jobs(
         if status and job["status"] != status:
             continue
             
-        jobs.append({
+        job_info = {
             "job_id": job_id,
             "status": job["status"],
             "started_at": job["started_at"],
-            "deal": job["deal"],
-            "stage": job["stage"],
             "epoch0": job["epoch0"],
             "message": job.get("message"),
             "error": job.get("error"),
             "cancelled": job.get("cancelled", False)
-        })
+        }
+        
+        # Add job-specific fields based on job type
+        if job.get("type") == "force_meeting_insights":
+            job_info.update({
+                "deal_names": job.get("deal_names", []),
+                "epoch_days": job.get("epoch_days")
+            })
+        else:
+            job_info.update({
+                "deal": job.get("deal"),
+                "stage": job.get("stage")
+            })
+            
+        jobs.append(job_info)
     
     return {
         "total_jobs": len(jobs),
@@ -728,6 +751,11 @@ def run_force_meeting_insights_job(job_id: str, deal_names: List[str], epoch0: s
                 return
                 
             print(Fore.YELLOW + f"\n### Force Syncing Meeting Insights for: {deal_name} ###" + Style.RESET_ALL)
+            
+            # First delete all existing meeting insights for this deal
+            print(Fore.YELLOW + f"Deleting existing meeting insights for deal: {deal_name}" + Style.RESET_ALL)
+            delete_result = meeting_insights_repo.delete_many({"deal_id": deal_name})
+            print(Fore.GREEN + f"Deleted {delete_result} existing meeting insights documents for {deal_name}" + Style.RESET_ALL)
             
             current_date = start_date
             while current_date <= end_date:

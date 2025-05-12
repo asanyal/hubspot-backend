@@ -31,4 +31,10 @@ class BaseRepository:
     def delete_one(self, filter_dict: Dict) -> bool:
         """Delete a single document"""
         result = self.collection.delete_one(filter_dict)
-        return result.deleted_count > 0 
+        return result.deleted_count > 0
+
+    def delete_many(self, filter_dict: Dict) -> int:
+        """Delete multiple documents matching the filter
+        Returns the number of documents deleted"""
+        result = self.collection.delete_many(filter_dict)
+        return result.deleted_count 
