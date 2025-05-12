@@ -399,7 +399,7 @@ class GongService:
                     if not calls or len(calls) == 0:
                         return default_response
                         
-                    call_id = self.get_call_id(calls, call_title)
+                    call_id = self.get_call_id(calls, company_name)
                     if not call_id:
                         return default_response
                 except Exception as e:
