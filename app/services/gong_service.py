@@ -119,13 +119,13 @@ class GongService:
         else:
             return []
 
-    def get_call_id(self, calls, call_title) -> str | None:
+    def get_call_id(self, calls, company_name) -> str | None:
         """Find a call by matching any word in call_title against the call's title (case-insensitive)"""
-        call_title_tokens = set(call_title.lower().split())
+        company_name_tokens = set(company_name.lower().split())
 
         for call in calls:
             title_tokens = set(call.get("title", "").lower().split())
-            if call_title_tokens & title_tokens:
+            if company_name_tokens & title_tokens:
                 return str(call["id"])
         return None
 
@@ -373,7 +373,9 @@ class GongService:
         return full_transcript, topics
 
     def get_buyer_intent(self, call_title, call_date, seller_name):
+        
         try:
+            company_name = extract_company_name(call_title)
             if isinstance(call_date, datetime):
                 call_date = call_date.strftime("%Y-%m-%d")
             
@@ -383,8 +385,8 @@ class GongService:
                 "explanation": f"No call found on {call_date}"
             }
 
-            calls = self.list_calls(call_date) # Lists calls on just that date
-            call_id = self.get_call_id(calls, call_title)
+            calls = self.list_calls(call_date)
+            call_id = self.get_call_id(calls, company_name)
 
             if not call_id:
                 # Try the next day
