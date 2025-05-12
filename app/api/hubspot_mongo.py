@@ -637,4 +637,106 @@ async def cancel_sync_job(job_id: str):
     return {
         "status": "success",
         "message": f"Job {job_id} marked for cancellation"
-    } 
+    }
+
+@router.post("/sync/force-meeting-insights", status_code=202)
+async def force_sync_meeting_insights(
+    background_tasks: BackgroundTasks,
+    deal_names: List[str] = Query(..., description="List of deal names to force sync meeting insights for"),
+    epoch_days: int = Query(..., description="Number of days ago to start syncing from")
+):
+    """
+    Force update meeting insights for specific deals from N days ago to today.
+    This will overwrite existing meeting insights data for the specified deals.
+    
+    Args:
+        deal_names: List of deal names to sync
+        epoch_days: Number of days ago to start syncing from
+        
+    Returns:
+        dict: Job status information
+    """
+    try:
+        # Calculate epoch0
+        today = datetime.now()
+        epoch_date = today - timedelta(days=epoch_days)
+        epoch0 = epoch_date.strftime("%Y-%m-%d")
+
+        # Generate a unique job ID
+        job_id = f"force_meeting_insights_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
+        
+        # Initialize job status
+        sync_jobs[job_id] = {
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "deal_names": deal_names,
+            "epoch_days": epoch_days,
+            "epoch0": epoch0,
+            "cancelled": False,
+            "type": "force_meeting_insights"
+        }
+
+        # Start the sync job in a background thread
+        thread = threading.Thread(
+            target=run_force_meeting_insights_job,
+            args=(job_id, deal_names, epoch0)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        # Store thread reference for potential cancellation
+        active_threads[job_id] = thread
+
+        return {
+            "status": "accepted",
+            "message": "Force sync meeting insights job started",
+            "job_id": job_id
+        }
+
+    except Exception as e:
+        print(Fore.RED + f"Error starting force sync meeting insights job: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error starting force sync meeting insights job: {str(e)}")
+
+def run_force_meeting_insights_job(job_id: str, deal_names: List[str], epoch0: str):
+    """Background function to run force sync meeting insights operations"""
+    try:
+        print(Fore.YELLOW + f"Starting force sync meeting insights job {job_id}: Syncing {len(deal_names)} deals from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
+        
+        # Convert epoch0 to datetime
+        start_date = datetime.strptime(epoch0, "%Y-%m-%d")
+        end_date = datetime.now()
+        
+        for deal_name in deal_names:
+            if sync_jobs[job_id].get("cancelled", False):
+                print(Fore.YELLOW + f"Job {job_id} was cancelled. Stopping force sync." + Style.RESET_ALL)
+                sync_jobs[job_id]["status"] = "cancelled"
+                sync_jobs[job_id]["message"] = "Job was cancelled by user"
+                return
+                
+            print(Fore.YELLOW + f"\n### Force Syncing Meeting Insights for: {deal_name} ###" + Style.RESET_ALL)
+            
+            current_date = start_date
+            while current_date <= end_date:
+                current_date_str = current_date.strftime("%Y-%m-%d")
+                try:
+                    # Use existing sync_meeting_insights method but with force update
+                    sync_service._sync_meeting_insights(deal_name, current_date_str, force_update=True)
+                    print(Fore.GREEN + f"Successfully force updated meeting insights for {deal_name} on {current_date_str}" + Style.RESET_ALL)
+                except Exception as e:
+                    print(Fore.RED + f"Error force updating meeting insights for {deal_name} on {current_date_str}: {str(e)}" + Style.RESET_ALL)
+                current_date += timedelta(days=1)
+        
+        sync_jobs[job_id]["status"] = "completed"
+        sync_jobs[job_id]["message"] = f"Successfully force synced meeting insights for {len(deal_names)} deals"
+        
+    except Exception as e:
+        print(Fore.RED + f"Error in force sync meeting insights job {job_id}: {str(e)}" + Style.RESET_ALL)
+        sync_jobs[job_id]["status"] = "failed"
+        sync_jobs[job_id]["message"] = f"Error force syncing meeting insights: {str(e)}"
+        sync_jobs[job_id]["error"] = str(e)
+    finally:
+        # Clean up thread reference
+        if job_id in active_threads:
+            del active_threads[job_id] 

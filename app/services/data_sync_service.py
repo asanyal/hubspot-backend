@@ -237,63 +237,64 @@ class DataSyncService:
             "last_updated": datetime.now()
         }
 
-    def _sync_meeting_insights(self, deal_name: str, call_date: str) -> None:
-        """Sync meeting information including champion analysis and buyer intent"""
+    def _sync_meeting_insights(self, deal_name: str, date_str: str, force_update: bool = False) -> None:
+        """
+        Sync meeting insights for a specific deal and date.
+        
+        Args:
+            deal_name: Name of the deal to sync meeting insights for
+            date_str: Date string in YYYY-MM-DD format
+            force_update: If True, will overwrite existing meeting insights data
+        """
         try:
-            # First check if there are any meetings for this deal on the given date
-            company_name = extract_company_name(deal_name)
-            calls = self.gong_service.list_calls(call_date)
-            call_id = self.gong_service.get_call_id(calls, company_name)
+            # Get meetings for the deal on the specified date
+            meetings = self.meeting_insights_repo.find_by_deal_and_date(deal_name, date_str)
             
-            if not call_id:
+            if not meetings:
+                print(Fore.YELLOW + f"No meetings found for deal {deal_name} on {date_str}" + Style.RESET_ALL)
                 return
-
-            print(Fore.GREEN + f"Meeting found for {deal_name} on {call_date}. Proceeding with sync..." + Style.RESET_ALL)
-            print(Fore.GREEN + f"Getting buyer intent for {deal_name} on {call_date}..." + Style.RESET_ALL)
-            buyer_intent = self.gong_service.get_buyer_intent(deal_name, call_date, "Galileo")
-
-            print(Fore.GREEN + f"Getting champion results for {deal_name} on {call_date}..." + Style.RESET_ALL)
-            call_datetime = datetime.strptime(call_date, "%Y-%m-%d")
-            champion_results = self.gong_service.get_champions(deal_name, target_date=call_datetime)
-            champion_data = []
-            # Process champion results if available 
-            if champion_results:
-                print(Fore.GREEN + f"Processing champion results for {deal_name} on {call_date}..." + Style.RESET_ALL)
-
-                for champion in champion_results:
-                    # Ensure champion data is properly structured
-                    champion_data.append({
-                        "champion": champion.get("champion", False),
-                        "explanation": champion.get("explanation", ""),
-                        "email": champion.get("email", ""),
-                        "speakerName": champion.get("speakerName", ""),
-                        "business_pain": champion.get("business_pain", ""),
-                        "parr_analysis": champion.get("parr_analysis", {})
-                    })
-            try:
-                meeting_data = {
-                    "deal_id": deal_name,
-                    "meeting_id": f"{deal_name}_{call_date}",
-                    "meeting_title": f"Call with {deal_name} on {call_date}",
-                    "meeting_date": call_datetime,
-                    "buyer_intent": buyer_intent,
-                    "champion_analysis": champion_data,
-                    "last_updated": datetime.now()
-                }
-
-                print(Fore.BLUE + f"[MongoDB] Updating MeetingInsights for {deal_name}." + Style.RESET_ALL)
-                self.meeting_insights_repo.upsert_meeting(
-                    deal_name,
-                    meeting_data["meeting_id"],
-                    meeting_data
-                )
-            except Exception as e:
-                print(Fore.RED + f"Error processing champion {champion.get('speakerName', 'Unknown')}: {str(e)}" + Style.RESET_ALL)
-                return 
-
+                
+            print(Fore.YELLOW + f"Found {len(meetings)} meetings for deal {deal_name} on {date_str}" + Style.RESET_ALL)
+            
+            # Get meeting insights for each meeting
+            for meeting in meetings:
+                meeting_id = meeting.get("meeting_id")
+                if not meeting_id:
+                    print(Fore.RED + f"Meeting ID not found for meeting in deal {deal_name} on {date_str}" + Style.RESET_ALL)
+                    continue
+                    
+                try:
+                    # Get meeting insights from Gong
+                    insights = self.gong_service.get_meeting_insights(meeting_id)
+                    
+                    if insights:
+                        # Add deal name and date to insights
+                        insights["deal_name"] = deal_name
+                        insights["date"] = date_str
+                        
+                        # Store insights in MongoDB
+                        if force_update:
+                            self.meeting_insights_repo.force_update_one(
+                                {"meeting_id": meeting_id},
+                                insights
+                            )
+                            print(Fore.GREEN + f"Force updated meeting insights for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
+                        else:
+                            self.meeting_insights_repo.update_one(
+                                {"meeting_id": meeting_id},
+                                insights
+                            )
+                            print(Fore.GREEN + f"Updated meeting insights for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + f"No insights found for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
+                        
+                except Exception as e:
+                    print(Fore.RED + f"Error syncing meeting insights for meeting {meeting_id} in deal {deal_name}: {str(e)}" + Style.RESET_ALL)
+                    continue
+                    
         except Exception as e:
-            print(Fore.RED + f"Error syncing meetings: {str(e)}" + Style.RESET_ALL)
-            return
+            print(Fore.RED + f"Error syncing meeting insights for deal {deal_name} on {date_str}: {str(e)}" + Style.RESET_ALL)
+            raise
 
     def _sync_timeline_events(self, deal_name: str, call_datetime: datetime, stats: Dict) -> None:
         """Sync timeline events from activities and meetings"""
