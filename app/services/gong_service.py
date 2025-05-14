@@ -119,16 +119,26 @@ class GongService:
         else:
             return []
 
-    def get_call_id(self, calls, company_name) -> str | None:
-        """Find a call by matching any word in call_title against the call's title (case-insensitive)"""
-        company_name_tokens = set(company_name.lower().split())
-        print(Fore.RED + f"Company name tokens: {company_name_tokens}" + Style.RESET_ALL)
+    def get_call_id(self, calls, company_name, call_title=None) -> str | None:
 
+        if call_title:
+            # Step 1: If call title exists, try an exact title match
+            for call in calls:
+                title = call.get("title", "").lower()
+                if title.lower() == call_title.lower():
+                    print(Fore.GREEN + f"Found exact match: '{title.lower()}'" + Style.RESET_ALL)
+                    return str(call["id"])
+
+        # Step 2: If no call title or no exact match
+        # check for a substring match between "company name" and call title
         for call in calls:
-            title_tokens = set(call.get("title", "").lower().split())
-            print(Fore.RED + f"Title tokens: {title_tokens}" + Style.RESET_ALL)
-            if company_name_tokens & title_tokens:
-                return str(call["id"])
+            company_name_tokens = company_name.lower().split()
+
+            for company_token in company_name_tokens:
+                if len(company_token) >= 2 and company_token in title.lower():
+                    print(Fore.GREEN + f"Substring matched: '{company_token}' found in '{title}'" + Style.RESET_ALL)
+                    return str(call["id"])
+
         return None
 
     def get_call_transcripts(self, call_ids, from_date, to_date) -> Dict[str, Any] | None:
@@ -215,7 +225,7 @@ class GongService:
                 
                 # Get calls for this date
                 calls = self.list_calls(date_str)
-                call_id = self.get_call_id(calls, company_name)  # Use company_name instead of call_title
+                call_id = self.get_call_id(calls, company_name, call_title=call_title)  # Use company_name instead of call_title
                 
                 if call_id:
                     print(Fore.GREEN + f"Found call on {date_str}" + Style.RESET_ALL)
@@ -388,7 +398,7 @@ class GongService:
             }
 
             calls = self.list_calls(call_date)
-            call_id = self.get_call_id(calls, company_name)
+            call_id = self.get_call_id(calls, company_name, call_title)
 
             if not call_id:
                 # Try the next day
@@ -401,7 +411,7 @@ class GongService:
                     if not calls or len(calls) == 0:
                         return default_response
                         
-                    call_id = self.get_call_id(calls, company_name)
+                    call_id = self.get_call_id(calls, company_name, call_title)
                     if not call_id:
                         return default_response
                 except Exception as e:

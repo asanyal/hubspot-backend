@@ -239,35 +239,24 @@ class DataSyncService:
         }
 
     def _sync_meeting_insights(self, deal_name: str, date_str: str, force_update: bool = False) -> None:
-        """
-        Sync meeting insights for a specific deal and date.
-        
-        Args:
-            deal_name: Name of the deal to sync meeting insights for
-            date_str: Date string in YYYY-MM-DD format
-            force_update: If True, will overwrite existing meeting insights data
-        """
+
         try:
             print(Fore.YELLOW + f"\n=== Starting Meeting Insights Sync for {deal_name} on {date_str} ===" + Style.RESET_ALL)
             print(Fore.YELLOW + f"Force Update: {force_update}" + Style.RESET_ALL)
             
-            # First, try to find meetings in Gong for this date
             print(Fore.BLUE + f"Checking Gong API for meetings on {date_str}..." + Style.RESET_ALL)
             calls = self.gong_service.list_calls(date_str)
             print(Fore.BLUE + f"Found {len(calls)} total calls in Gong for {date_str}" + Style.RESET_ALL)
             
-            # Extract company name from deal name
             company_name = extract_company_name(deal_name)
             print(Fore.MAGENTA + f"Looking for meetings matching company name: {company_name}" + Style.RESET_ALL)
             
-            # Try to find a matching call
             call_id = self.gong_service.get_call_id(calls, company_name)
             if call_id:
                 print(Fore.GREEN + f"Found matching call in Gong: {call_id}" + Style.RESET_ALL)
             else:
                 print(Fore.YELLOW + f"No matching call found in Gong for {company_name} on {date_str}" + Style.RESET_ALL)
             
-            # Get meetings for the deal on the specified date from MongoDB
             print(Fore.BLUE + f"Checking MongoDB for existing meetings..." + Style.RESET_ALL)
             meetings = self.meeting_insights_repo.find_by_deal_and_date(deal_name, date_str)
             

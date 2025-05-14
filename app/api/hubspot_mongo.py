@@ -738,7 +738,7 @@ def run_force_meeting_insights_job(job_id: str, deal_names: List[str], epoch0: s
     """Background function to run force sync meeting insights operations"""
     try:
         print(Fore.YELLOW + f"Starting force sync meeting insights job {job_id}: Syncing {len(deal_names)} deals from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
-        
+
         # Convert epoch0 to datetime
         start_date = datetime.strptime(epoch0, "%Y-%m-%d")
         end_date = datetime.now()
