@@ -132,10 +132,11 @@ class GongService:
         # Step 2: If no call title or no exact match
         # check for a substring match between "company name" and call title
         for call in calls:
+            title = call.get("title", "").lower()  # Get title inside this loop
             company_name_tokens = company_name.lower().split()
 
             for company_token in company_name_tokens:
-                if len(company_token) >= 2 and company_token in title.lower():
+                if len(company_token) >= 2 and company_token in title:  # Use title from this scope
                     print(Fore.GREEN + f"Substring matched: '{company_token}' found in '{title}'" + Style.RESET_ALL)
                     return str(call["id"])
 
