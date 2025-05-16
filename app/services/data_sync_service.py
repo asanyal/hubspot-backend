@@ -86,7 +86,7 @@ class DataSyncService:
 
             self._sync_deal_info(deal_name, company_name, stats) ### Global
             self._sync_deal_insights(deal_name, epoch0, stats) ### Global
-            self._sync_timeline_events(deal_name, epoch0, stats) ### Global
+            self._sync_timeline_events(deal_name) ### Global
 
             return
 
@@ -241,47 +241,20 @@ class DataSyncService:
     def _sync_meeting_insights(self, deal_name: str, date_str: str, force_update: bool = False) -> None:
 
         try:
-            print(Fore.YELLOW + f"\n=== Starting Meeting Insights Sync for {deal_name} on {date_str} ===" + Style.RESET_ALL)
-            print(Fore.YELLOW + f"Force Update: {force_update}" + Style.RESET_ALL)
-            
-            print(Fore.BLUE + f"Checking Gong API for meetings on {date_str}..." + Style.RESET_ALL)
             calls = self.gong_service.list_calls(date_str)
-            print(Fore.BLUE + f"Found {len(calls)} total calls in Gong for {date_str}" + Style.RESET_ALL)
-            
-            company_name = extract_company_name(deal_name)
-            print(Fore.MAGENTA + f"Looking for meetings matching company name: {company_name}" + Style.RESET_ALL)
-            
-            call_id = self.gong_service.get_call_id(calls, company_name)
-            if call_id:
-                print(Fore.GREEN + f"Found matching call in Gong: {call_id}" + Style.RESET_ALL)
-            else:
-                print(Fore.YELLOW + f"No matching call found in Gong for {company_name} on {date_str}" + Style.RESET_ALL)
-            
-            print(Fore.BLUE + f"Checking MongoDB for existing meetings..." + Style.RESET_ALL)
+            call_id = self.gong_service.get_call_id(calls, extract_company_name(deal_name))
             meetings = self.meeting_insights_repo.find_by_deal_and_date(deal_name, date_str)
-            
-            if not meetings:
-                print(Fore.YELLOW + f"No meetings found in MongoDB for deal {deal_name} on {date_str}" + Style.RESET_ALL)
-                if call_id:
-                    print(Fore.BLUE + f"But we found a call in Gong! We should create a new meeting record..." + Style.RESET_ALL)
-                    # TODO: We should probably create a new meeting record here
-                return
-                
-            print(Fore.YELLOW + f"Found {len(meetings)} meetings in MongoDB for deal {deal_name} on {date_str}" + Style.RESET_ALL)
+            if call_id and not meetings:
+                meeting_id = f"{deal_name}_{date_str}"
+                self.meeting_insights_repo.upsert_meeting(deal_name, meeting_id, {"meeting_date": date_str})
             
             # Get meeting insights for each meeting
             for meeting in meetings:
                 meeting_id = meeting.get("meeting_id")
                 if not meeting_id:
-                    print(Fore.RED + f"Meeting ID not found for meeting in deal {deal_name} on {date_str}" + Style.RESET_ALL)
                     continue
                     
                 try:
-                    print(Fore.MAGENTA + f"\nProcessing meeting {meeting_id}:" + Style.RESET_ALL)
-                    print(Fore.MAGENTA + f"Current meeting data: {json.dumps(meeting, indent=2)}" + Style.RESET_ALL)
-                    
-                    # Get meeting insights from Gong
-                    print(Fore.BLUE + "Fetching fresh insights from Gong API..." + Style.RESET_ALL)
                     insights = self.gong_service.get_meeting_insights(meeting_id)
                     
                     if insights:
@@ -289,31 +262,16 @@ class DataSyncService:
                         insights["deal_name"] = deal_name
                         insights["date"] = date_str
                         
-                        # Log buyer intent data
-                        if "buyer_intent" in insights:
-                            print(Fore.GREEN + "\nBuyer Intent Data:" + Style.RESET_ALL)
-                            print(Fore.GREEN + f"Intent: {insights['buyer_intent'].get('intent', 'N/A')}" + Style.RESET_ALL)
-                            print(Fore.GREEN + f"Explanation: {insights['buyer_intent'].get('explanation', 'N/A')}" + Style.RESET_ALL)
-                        else:
-                            print(Fore.YELLOW + "No buyer intent data found in insights" + Style.RESET_ALL)
-                        
-                        # Store insights in MongoDB
                         if force_update:
-                            print(Fore.BLUE + f"Force updating meeting insights in MongoDB..." + Style.RESET_ALL)
                             self.meeting_insights_repo.force_update_one(
                                 {"meeting_id": meeting_id},
                                 insights
                             )
-                            print(Fore.GREEN + f"Successfully force updated meeting insights for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
                         else:
-                            print(Fore.BLUE + f"Updating meeting insights in MongoDB..." + Style.RESET_ALL)
                             self.meeting_insights_repo.update_one(
                                 {"meeting_id": meeting_id},
                                 insights
                             )
-                            print(Fore.GREEN + f"Successfully updated meeting insights for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
-                    else:
-                        print(Fore.YELLOW + f"No insights found for meeting {meeting_id} in deal {deal_name}" + Style.RESET_ALL)
                         
                 except Exception as e:
                     print(Fore.RED + f"Error syncing meeting insights for meeting {meeting_id} in deal {deal_name}: {str(e)}" + Style.RESET_ALL)
@@ -323,21 +281,13 @@ class DataSyncService:
             print(Fore.RED + f"Error syncing meeting insights for deal {deal_name} on {date_str}: {str(e)}" + Style.RESET_ALL)
             raise
 
-    def _sync_timeline_events(self, deal_name: str, call_datetime: datetime, stats: Dict) -> None:
+    def _sync_timeline_events(self, deal_name: str) -> None:
         """Sync timeline events from activities and meetings"""
         try:
-            # Get timeline data from Hubspot
-            print(Fore.YELLOW + f"Getting timeline data from Hubspot for {deal_name}..." + Style.RESET_ALL)
-            timeline_data = self.hubspot_service.get_deal_timeline(deal_name, include_content=True)
-
-            stats["timeline_events"] = 0  # Reset counter since we're not processing events yet
-            # add to mongo db
-            print(Fore.BLUE + f"[MongoDB] Updating DealTimeline for {deal_name}." + Style.RESET_ALL)
+            timeline_data = self.hubspot_service.get_deal_timeline(deal_name)
             self.deal_timeline_repo.upsert_timeline(deal_name, timeline_data)
-            stats["timeline_events"] = len(timeline_data)
         except Exception as e:
             print(Fore.RED + f"Error getting timeline data: {str(e)}" + Style.RESET_ALL)
-            stats["errors"].append(f"Error getting timeline data: {str(e)}")
 
     def sync_company_overviews(self, deal_name: str) -> None:
         """Sync company overviews for a specific deal"""

@@ -200,7 +200,7 @@ async def get_deal_timeline(
     try:
         # measure the time it takes to get the timeline data
         start_time = time.time()
-        timeline_data = hubspot_service.get_deal_timeline(dealName, include_content=True)
+        timeline_data = hubspot_service.get_deal_timeline(dealName)
         end_time = time.time()
         print(Fore.BLUE + f"[GetDealTimeline] Took: {end_time - start_time} s" + Style.RESET_ALL)
         

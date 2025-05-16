@@ -2,6 +2,7 @@ import requests
 from datetime import datetime
 from app.core.config import settings
 from typing import List, Dict, Any, Optional
+from app.utils.general_utils import extract_company_name
 import concurrent.futures
 from app.services.llm_service import ask_openai
 from colorama import Fore, Style, init
@@ -522,49 +523,47 @@ class HubspotService:
         
         return validated_deals
 
-    def get_deal_timeline(self, deal_name: str, include_content: bool = False) -> Dict[str, Any]:
+    def get_deal_timeline(self, deal_name: str) -> Dict[str, Any]:
         """Get timeline data for a specific deal. Returns email content if include_content is True"""
         import concurrent.futures
         from datetime import datetime
         print(Fore.CYAN + f"Getting timeline for deal: {deal_name}" + Style.RESET_ALL)
-        
+
         try:
-            if hasattr(self, '_find_deal_id'):
-                deal_id = self._find_deal_id(deal_name)
-            else:
-                deals_url = "https://api.hubapi.com/crm/v3/objects/deals"
-                params = {"properties": "dealname,id", "limit": "100"}
-                
-                all_deals = []
-                after = None
-                
-                while True:
-                    if after:
-                        params["after"] = after
-                        
-                    response = self._session.get(deals_url, params=params) if hasattr(self, '_session') else requests.get(deals_url, headers=self.headers, params=params)
+            # Always fetch fresh deal ID data instead of using cache
+            deals_url = "https://api.hubapi.com/crm/v3/objects/deals"
+            params = {"properties": "dealname,id", "limit": "100"}
+
+            all_deals = []
+            after = None
+
+            while True:
+                if after:
+                    params["after"] = after
                     
-                    if response.status_code == 200:
-                        result = response.json()
-                        deals_page = result.get("results", [])
-                        all_deals.extend(deals_page)
-                        
-                        pagination = result.get("paging", {})
-                        if "next" in pagination and "after" in pagination["next"]:
-                            after = pagination["next"]["after"]
-                        else:
-                            break
-                    else:
-                        print(Fore.CYAN + f"[ERROR][get_deal_timeline] Error fetching deals: {response.status_code}" + Style.RESET_ALL)
-                        return {"events": [], "start_date": None, "end_date": None}
+                response = self._session.get(deals_url, params=params) if hasattr(self, '_session') else requests.get(deals_url, headers=self.headers, params=params)
                 
-                # Find the deal ID by matching deal name
-                deal_id = None
-                for deal in all_deals:
-                    if deal.get('properties', {}).get('dealname') == deal_name:
-                        deal_id = deal.get('id')
+                if response.status_code == 200:
+                    result = response.json()
+                    deals_page = result.get("results", [])
+                    all_deals.extend(deals_page)
+                    
+                    pagination = result.get("paging", {})
+                    if "next" in pagination and "after" in pagination["next"]:
+                        after = pagination["next"]["after"]
+                    else:
                         break
+                else:
+                    print(Fore.CYAN + f"[ERROR][get_deal_timeline] Error fetching deals: {response.status_code}" + Style.RESET_ALL)
+                    return {"events": [], "start_date": None, "end_date": None}
             
+            # Find the deal ID by matching deal name
+            deal_id = None
+            for deal in all_deals:
+                if deal.get('properties', {}).get('dealname') == deal_name:
+                    deal_id = deal.get('id')
+                    break
+
             if not deal_id:
                 print(f"Deal with name '{deal_name}' not found.")
                 return {"events": [], "start_date": None, "end_date": None}
@@ -587,11 +586,11 @@ class HubspotService:
                 return {"events": [], "start_date": None, "end_date": None}
             
             print(Fore.CYAN + f"Found {len(engagement_ids)} activities for this deal" + Style.RESET_ALL)
-            
+
             timeline_events = []
             start_engagement_date = None
             latest_engagement_date = None
-            
+
             # Thread to process engagements in parallel
             def fetch_and_process_engagement(eng_id):
                 try:
@@ -599,10 +598,10 @@ class HubspotService:
                     detail_params = {
                         "properties": "hs_engagement_type,hs_timestamp,hs_email_subject,hs_email_text,hs_note_body,hs_call_body,hs_meeting_title,hs_meeting_body,hs_task_body"
                     }
-                    
+
                     # Use _session if available, otherwise fallback
                     detail_response = self._session.get(detail_url, params=detail_params) if hasattr(self, '_session') else requests.get(detail_url, headers=self.headers, params=detail_params)
-                    
+
                     if detail_response.status_code != 200:
                         return None
                         
@@ -674,7 +673,7 @@ class HubspotService:
                         result = self.gong_service.get_buyer_intent(
                             call_title=subject.strip(), 
                             call_date=date_time.strftime('%Y-%m-%d'),
-                            seller_name="Atin Sanyal"
+                            seller_name="Galileo"
                         )
                         # Add null check here
                         if result is not None:
@@ -706,10 +705,10 @@ class HubspotService:
                                 Shorten the content of the email to 2 lines: {content}
                             """
                         )
-                        
+
                     # Prepare content preview
                     content_preview = content[:150] + "..." if len(content) > 150 else content
-                    
+
                     # Create event object
                     event = {
                         "id": event_id,
@@ -760,6 +759,10 @@ class HubspotService:
                         print(Fore.RED + f"[ERROR][get_deal_timeline] Error processing future result: {str(e)}" + Style.RESET_ALL)
                         continue
             
+            company_name = extract_company_name(deal_name)
+            gong_meetings_events = self.gong_service.get_meetings(company_name, timeline_events)
+            timeline_events.extend(gong_meetings_events)
+
             # Sort events by date
             timeline_events.sort(key=lambda x: (x["date_str"], x["time_str"]))
             

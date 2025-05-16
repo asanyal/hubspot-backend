@@ -34,16 +34,15 @@ class MeetingInsightsRepository(BaseRepository):
         })
 
     def upsert_meeting(self, deal_id: str, meeting_id: str, meeting_data: Dict) -> bool:
-        # First check if a meeting with this ID already exists
-        existing_meeting = self.get_by_meeting_id(deal_id, meeting_id)
-        if existing_meeting:
-            print(Fore.RED + f"Meeting {meeting_id} already exists for deal {deal_id}. Not overwriting." + Style.RESET_ALL)
-            return False
-
-        # If no existing meeting, proceed with insert
+        # Always upsert (insert or update) the meeting
         meeting_data["deal_id"] = deal_id
         meeting_data["meeting_id"] = meeting_id
         meeting_data["last_updated"] = datetime.now(timezone.utc)
-        print(Fore.GREEN + f"Inserting meeting {meeting_id} for deal {deal_id}" + Style.RESET_ALL)
-        result = self.collection.insert_one(meeting_data)
-        return result.inserted_id is not None 
+        print(Fore.GREEN + f"Upserting meeting {meeting_id} for deal {deal_id}" + Style.RESET_ALL)
+        result = self.collection.update_one(
+            {"deal_id": deal_id, "meeting_id": meeting_id},
+            {"$set": meeting_data},
+            upsert=True
+        )
+        # Return True if a document was inserted or modified
+        return result.upserted_id is not None or result.modified_count > 0 

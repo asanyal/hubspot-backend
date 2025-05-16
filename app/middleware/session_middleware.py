@@ -15,7 +15,6 @@ class SessionMiddleware(BaseHTTPMiddleware):
         print(Fore.BLUE + f"Request path: {request.url.path}" + Style.RESET_ALL)
         
         # Skip session validation for all endpoints
-        print(Fore.GREEN + f"Skipping session validation for {request.url.path}" + Style.RESET_ALL)
         return await call_next(request)
 
         # Get browser ID from request headers

@@ -15,25 +15,9 @@ class DealTimelineRepository(BaseRepository):
         return self.find_one({"deal_id": deal_id})
 
     def upsert_timeline(self, deal_id: str, timeline_data: Dict) -> bool:
-        """
-        Upsert timeline data from HubSpot
-        Args:
-            deal_id: The deal ID
-            timeline_data: Dictionary containing timeline data from HubSpot
-                {
-                    'events': List[Dict],
-                    'start_date': str,
-                    'end_date': str,
-                    'deal_id': str,
-                    'champions_summary': Dict
-                }
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        # Transform events to match our schema
+
         transformed_events = []
         for event in timeline_data.get('events', []):
-            # Combine date and time strings into a datetime object
             event_date = datetime.strptime(
                 f"{event['date_str']} {event['time_str']}", 
                 "%Y-%m-%d %H:%M"
