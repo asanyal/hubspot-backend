@@ -48,17 +48,17 @@ class DataSyncService:
                 print(Fore.YELLOW + f"\n### Syncing Global Data for: {deal_name} ###" + Style.RESET_ALL)
                 
                 self.sync_global_deal_data(deal_name, epoch0)
-                # self.sync_company_overviews(deal_name)
+                self.sync_company_overviews(deal_name)
 
                 current_date = datetime.strptime(epoch0, "%Y-%m-%d")
                 end_date = datetime.strptime(datetime.now().strftime("%Y-%m-%d"), "%Y-%m-%d")
 
                 print(Fore.YELLOW + f"\n### Syncing Meeting Data for: {deal_name} ###" + Style.RESET_ALL)
 
-                # while current_date <= end_date:
-                #     current_date_str = current_date.strftime("%Y-%m-%d")
-                #     self._sync_meeting_insights(deal_name, current_date_str)
-                #     current_date += timedelta(days=1)
+                while current_date <= end_date:
+                    current_date_str = current_date.strftime("%Y-%m-%d")
+                    self._sync_meeting_insights(deal_name, current_date_str)
+                    current_date += timedelta(days=1)
 
             except Exception as e:
                 print(Fore.RED + f"Error syncing deal data: {str(e)}" + Style.RESET_ALL)
@@ -83,9 +83,8 @@ class DataSyncService:
                 print(Fore.RED + f"Could not extract company name from deal name: {deal_name}" + Style.RESET_ALL)
                 return
 
-
-            # self._sync_deal_info(deal_name, company_name, stats) ### Global
-            # self._sync_deal_insights(deal_name, epoch0, stats) ### Global
+            self._sync_deal_info(deal_name, company_name, stats) ### Global
+            self._sync_deal_insights(deal_name, epoch0, stats) ### Global
             self._sync_timeline_events(deal_name) ### Global
 
             return
