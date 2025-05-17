@@ -27,7 +27,7 @@ company_name_prompt = """
     Extract name of the company from this call title.
     "Galileo" is not a company name.
     Call title: {call_title}
-    
+
     RULES:
     1. If the title contains " - New Deal", extract everything before it
     2. If the title contains " <> ", extract everything before it
@@ -154,24 +154,41 @@ parr_principle_prompt = """
 """
 
 buyer_intent_prompt = """
-    Analyze the buyer sentiment from this transcript. 
-    Return the intent, and a structured explanation in JSON. 
-    Intent options: Less likely to buy, Neutral, Unsure, Likely to buy, Very likely to buy
-    If there is any explicit frustration, hesitation, or uncertainty in buying - choose Less likely to buy.
-    Choose 'Very likely to buy' only if there is strong interest from the buyer 
-    i.e. they mention they love the product.
+    Analyze the transcript of a sales call between a potential buyer and Galileo.
 
-    For the explanation, include the following sections (only if mentioned in the transcript):
-    1. Background & Team Context
-    2. Current State & Use Cases
-    3. Gap Analysis & Pain Points
-    4. Next Steps & Requirements
-    5. Requirements
+    Your goal is to assess the buyer's intent and determine whether the overall engagement is trending positively or negatively.
 
-    Format the explanation as a single string with clear section headers.
-    Please provide your response without using markdown formatting like **, ##.
-    Keep each section brief and only include information explicitly mentioned in the transcript.
-    The output should be JSON with 2 fields only: intent and explanation.
+    Define intent based strictly on clear evidence of buyer interest or disinterest, not on generic politeness or small talk.
+
+    Positive signals include:
+        •	Expressions of urgency
+        •	Explicit product enthusiasm or praise
+        •	Strong alignment with pain points
+        •	Clear ownership of next steps
+
+    Negative signals include:
+        •	Frustration, hesitation, or skepticism
+        •	Confusion about product fit
+        •	Deferral, lack of urgency, or unclear ownership
+
+    Output must be valid JSON with the following two fields only:
+        1.	"intent": One of the following values:
+        •	"Less likely to buy"
+        •	"Unsure"
+        •	"Neutral"
+        •	"Likely to buy"
+        2.	"explanation": A structured string broken down into the following headers:
+        •	Background & Team Context
+        •	Current State & Use Cases
+        •	Gap Analysis & Pain Points
+        •	Positive & Negative Signals
+        •	Next Steps & Requirements
+
+    Each section should be concise and grounded only in what is explicitly said in the transcript.
+    Avoid speculation.
+    For ONLY the explanation section, use markdown formatting for the headers, the text etc.
+    Return only the JSON response, no commentary or explanation before or after.
+
     Seller: {seller_name}
     Transcript: {call_transcript}
 

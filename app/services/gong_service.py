@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Any
+from app.services.llm_service import ask_openai
 
 import sys
 import os
@@ -17,6 +18,7 @@ from app.utils.prompts import champion_prompt, parr_principle_prompt, buyer_inte
 from app.utils.general_utils import extract_company_name
 
 import time
+import uuid
 
 init()
 
@@ -686,6 +688,168 @@ class GongService:
     def get_cached_champion_deals(self) -> List[str]:
         """Returns a list of deal names currently in the cache"""
         return self.champion_cache.keys()
+
+    def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], num_days_back: int = 7) -> List[Dict]:
+        """
+        Get additional meetings from Gong that are not present in HubSpot timeline events.
+        
+        Args:
+            company_name: Name of the company to search for
+            timeline_events: List of existing timeline events from HubSpot
+            num_days_back: Number of days to look back for meetings (default: 7)
+            
+        Returns:
+            List of meeting events in the same format as HubSpot events
+        """
+        try:
+            print(Fore.MAGENTA + f"\n=== Fetching Additional Gong Meetings for {company_name} ===" + Style.RESET_ALL)
+            
+            # Get existing meeting subjects to avoid duplicates
+            existing_subjects = {event.get("subject", "").lower() for event in timeline_events}
+            
+            # Calculate date range
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=num_days_back)
+            
+            # Ensure we're not looking at future dates
+            if end_date > datetime.now():
+                end_date = datetime.now()
+            if start_date > datetime.now():
+                start_date = datetime.now() - timedelta(days=num_days_back)
+            
+            print(Fore.MAGENTA + f"Searching for meetings from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}" + Style.RESET_ALL)
+            
+            additional_meetings = []
+            current_date = start_date
+            
+            while current_date <= end_date:
+                date_str = current_date.strftime("%Y-%m-%d")
+                print(Fore.MAGENTA + f"\nChecking date: {date_str}" + Style.RESET_ALL)
+                
+                # Get calls for this date
+                calls = self.list_calls(date_str)
+                
+                for call in calls:
+                    call_title = call.get("title", "").lower()
+                    
+                    # Skip if call title is empty
+                    if not call_title:
+                        continue
+                        
+                    # Use the same matching logic as get_call_id
+                    company_name_lower = company_name.lower()
+                    company_name_tokens = company_name_lower.split()
+                    title_tokens = call_title.split()
+                    
+                    print(Fore.CYAN + f"\nComparing call: '{call_title}'" + Style.RESET_ALL)
+                    print(Fore.CYAN + f"Company name tokens: {company_name_tokens}" + Style.RESET_ALL)
+                    print(Fore.CYAN + f"Title tokens: {title_tokens}" + Style.RESET_ALL)
+                    
+                    # Check if any company name token is a substring of any title token
+                    is_match = False
+                    for company_token in company_name_tokens:
+                        for title_token in title_tokens:
+                            print(Fore.YELLOW + f"Checking if '{company_token}' is in '{title_token}'" + Style.RESET_ALL)
+                            if company_token in title_token:
+                                print(Fore.GREEN + f"Found substring match: '{company_token}' in '{title_token}'" + Style.RESET_ALL)
+                                is_match = True
+                                break
+                        if is_match:
+                            break
+                    
+                    if not is_match:
+                        print(Fore.RED + f"No match found for call: '{call_title}'" + Style.RESET_ALL)
+                        continue
+                        
+                    print(Fore.GREEN + f"Processing matched call: {call_title}" + Style.RESET_ALL)
+                    # Skip if this meeting already exists in timeline events
+                    if call_title in existing_subjects:
+                        print(Fore.CYAN + f"Skipping duplicate meeting: {call_title}" + Style.RESET_ALL)
+                        continue
+                    
+                    print(Fore.GREEN + f"Processing new meeting: {call_title}" + Style.RESET_ALL)
+                    
+                    # Get call ID and transcript
+                    call_id = call.get("id")
+                    if not call_id:
+                        continue
+                        
+                    start_time = f"{date_str}T00:00:00Z"
+                    end_time = f"{date_str}T23:59:59Z"
+                    
+                    # Get transcript
+                    transcript_data = self.get_call_transcripts([call_id], start_time, end_time)
+                    if not transcript_data or "callTranscripts" not in transcript_data:
+                        continue
+                        
+                    # Combine all non-Galileo transcripts
+                    transcript = ""
+                    for call_transcript in transcript_data["callTranscripts"]:
+                        for part in call_transcript.get("transcript", []):
+                            speaker_id = part.get("speakerId", "unknown")
+                            # Skip Galileo speakers
+                            if "galileo.ai" in speaker_id.lower():
+                                continue
+                            
+                            if "sentences" in part:
+                                for sentence in part["sentences"]:
+                                    transcript += sentence.get("text", "") + " "
+                    
+                    if not transcript.strip():
+                        continue
+                    
+                    # Get buyer intent
+                    buyer_intent = self.get_buyer_intent(
+                        call_title=call.get("title", ""),
+                        call_date=date_str,
+                        seller_name="Galileo"
+                    )
+                    
+                    # Get sentiment
+                    sentiment = "neutral"
+                    if transcript:
+                        # Truncate content to a reasonable length before analysis
+                        max_content_length = 10000  # Roughly 2500 tokens
+                        if len(transcript) > max_content_length:
+                            transcript = transcript[:max_content_length] + "..."
+                            
+                        sentiment = ask_openai(
+                            system_content="You are a smart Sales Operations Analyst that analyzes Sales emails.",
+                            user_content=f"""
+                            Classify the buyer sentiment in this email as positive (likely to purchase), negative (unlikely to purchase), or neutral (undecided):
+                            {transcript}
+                            Return only one word: positive, negative, or neutral
+                            """
+                        )
+                    
+                    # Create event object
+                    event = {
+                        "id": f"gong_{uuid.uuid4()}",
+                        "engagement_id": None,
+                        "date_str": date_str,
+                        "time_str": call.get("startTime", "").split("T")[1][:5] if "startTime" in call else "00:00",
+                        "type": "Meeting",
+                        "subject": call.get("title", ""),
+                        "content": "",
+                        "content_preview": "",
+                        "sentiment": sentiment,
+                        "buyer_intent": buyer_intent.get("intent", "Not available"),
+                        "buyer_intent_explanation": buyer_intent.get("explanation", "Not available")
+                    }
+                    
+                    additional_meetings.append(event)
+                    print(Fore.GREEN + f"Added new meeting: {event['subject']}" + Style.RESET_ALL)
+                
+                current_date += timedelta(days=1)
+            
+            print(Fore.MAGENTA + f"\nFound {len(additional_meetings)} additional meetings" + Style.RESET_ALL)
+            return additional_meetings
+            
+        except Exception as e:
+            print(Fore.RED + f"Error in get_additional_meetings: {str(e)}" + Style.RESET_ALL)
+            import traceback
+            traceback.print_exc()
+            return []
 
     def get_meeting_insights(self, meeting_id: str) -> Dict:
         """

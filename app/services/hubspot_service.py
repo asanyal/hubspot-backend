@@ -1,5 +1,5 @@
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.config import settings
 from typing import List, Dict, Any, Optional
 from app.utils.general_utils import extract_company_name
@@ -530,7 +530,6 @@ class HubspotService:
         print(Fore.CYAN + f"Getting timeline for deal: {deal_name}" + Style.RESET_ALL)
 
         try:
-            # Always fetch fresh deal ID data instead of using cache
             deals_url = "https://api.hubapi.com/crm/v3/objects/deals"
             params = {"properties": "dealname,id", "limit": "100"}
 
@@ -685,7 +684,7 @@ class HubspotService:
                     sentiment = "neutral"
                     if content is not None and content != "":
                         # Truncate content to a reasonable length before analysis
-                        max_content_length = 10000  # Roughly 2500 tokens
+                        max_content_length = 15000
                         if len(content) > max_content_length:
                             content = content[:max_content_length] + "..."
                             
@@ -758,10 +757,33 @@ class HubspotService:
                     except Exception as e:
                         print(Fore.RED + f"[ERROR][get_deal_timeline] Error processing future result: {str(e)}" + Style.RESET_ALL)
                         continue
-            
+
+            # Get additional meetings from Gong
             company_name = extract_company_name(deal_name)
-            gong_meetings_events = self.gong_service.get_meetings(company_name, timeline_events)
-            timeline_events.extend(gong_meetings_events)
+            print(Fore.CYAN + f"Fetching additional meetings from Gong for company: {company_name}" + Style.RESET_ALL)
+            gong_meetings_events = self.gong_service.get_additional_meetings(company_name, timeline_events)
+            if gong_meetings_events:
+                print(Fore.GREEN + f"Found {len(gong_meetings_events)} additional meetings from Gong" + Style.RESET_ALL)
+                timeline_events.extend(gong_meetings_events)
+                
+                # Recalculate end_date to include Gong meetings
+                for event in gong_meetings_events:
+                    try:
+                        # Parse the date and make it timezone-aware
+                        event_date = datetime.strptime(f"{event['date_str']} {event['time_str']}", "%Y-%m-%d %H:%M")
+                        event_date = event_date.replace(tzinfo=timezone.utc)  # Make it timezone-aware
+                        
+                        # Ensure latest_engagement_date is also timezone-aware
+                        if latest_engagement_date and latest_engagement_date.tzinfo is None:
+                            latest_engagement_date = latest_engagement_date.replace(tzinfo=timezone.utc)
+                            
+                        if latest_engagement_date is None or event_date > latest_engagement_date:
+                            latest_engagement_date = event_date
+                    except (ValueError, TypeError) as e:
+                        print(Fore.YELLOW + f"Could not parse date for Gong event: {str(e)}" + Style.RESET_ALL)
+                        continue
+            else:
+                print(Fore.YELLOW + "No additional meetings found in Gong" + Style.RESET_ALL)
 
             # Sort events by date
             timeline_events.sort(key=lambda x: (x["date_str"], x["time_str"]))
