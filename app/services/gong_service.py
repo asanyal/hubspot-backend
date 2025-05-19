@@ -102,6 +102,16 @@ class GongService:
         cache_ttl = getattr(settings, 'GONG_CACHE_TTL', 604800)  # 7 days in seconds
         self.champion_cache = LRUCache(capacity=cache_capacity, ttl=cache_ttl)
 
+    def _normalize_text(self, text: str) -> str:
+        """Normalize text by removing special characters and replacing them with spaces."""
+        # Replace special characters with spaces
+        special_chars = ['<', '>', '/', '-']
+        normalized = text
+        for char in special_chars:
+            normalized = normalized.replace(char, ' ')
+        # Remove extra spaces and convert to lowercase
+        return ' '.join(normalized.split()).lower()
+
     def list_calls(self, call_date) -> List[Dict]:
         url = "https://us-5738.api.gong.io/v2/calls"
 
@@ -117,31 +127,73 @@ class GongService:
         response = requests.get(url, auth=(self.access_key, self.client_secret), params=params)
         if response.ok:
             calls = response.json().get("calls", [])
+            
+            # Get detailed information for each call including attendees
+            for call in calls:
+                call_id = call.get("id")
+                if call_id:
+                    # Get extensive call data
+                    extensive_url = "https://us-5738.api.gong.io/v2/calls/extensive"
+                    headers = {'Content-Type': 'application/json'}
+                    extensive_payload = {
+                        "filter": {
+                            "callIds": [str(call_id)]
+                        },
+                        "contentSelector": {
+                            "exposedFields": {
+                                "parties": True,
+                                "interaction": {
+                                    "speakers": True
+                                }
+                            }
+                        }
+                    }
+                    
+                    extensive_response = requests.post(
+                        extensive_url,
+                        auth=(self.access_key, self.client_secret),
+                        headers=headers,
+                        json=extensive_payload
+                    )
+                    
+                    if extensive_response.ok:
+                        call_data = extensive_response.json()
+                        calls_data = call_data.get("calls", [])
+                        if calls_data:
+                            # Add attendee information to the call object
+                            call["attendees"] = []
+                            for party in calls_data[0].get("parties", []):
+                                attendee = {
+                                    "name": party.get("name", "N/A"),
+                                    "email": party.get("emailAddress", "N/A"),
+                                    "affiliation": party.get("affiliation", "N/A")
+                                }
+                                call["attendees"].append(attendee)
+            
             return calls
         else:
             return []
 
     def get_call_id(self, calls, company_name, call_title=None) -> str | None:
-
+        """ return the ID of a matching call based on the company_name or call_title """
         if call_title:
             # Step 1: If call title exists, try an exact title match
+            normalized_call_title = self._normalize_text(call_title)
             for call in calls:
-                title = call.get("title", "").lower()
-                if title.lower() == call_title.lower():
-                    print(Fore.GREEN + f"Found exact match: '{title.lower()}'" + Style.RESET_ALL)
+                title = self._normalize_text(call.get("title", ""))
+                if title == normalized_call_title:
+                    print(Fore.GREEN + f"Found exact match: '{title}'" + Style.RESET_ALL)
                     return str(call["id"])
 
         # Step 2: If no call title or no exact match
-        # check for a substring match between "company name" and call title
+        normalized_company_name = self._normalize_text(company_name)
         for call in calls:
-            title = call.get("title", "").lower()  # Get title inside this loop
-            company_name_tokens = company_name.lower().split()
-
+            title = self._normalize_text(call.get("title", ""))
+            company_name_tokens = normalized_company_name.split()
             for company_token in company_name_tokens:
-                if len(company_token) >= 2 and company_token in title:  # Use title from this scope
+                if len(company_token) >= 2 and company_token in title:
                     print(Fore.GREEN + f"Substring matched: '{company_token}' found in '{title}'" + Style.RESET_ALL)
                     return str(call["id"])
-
         return None
 
     def get_call_transcripts(self, call_ids, from_date, to_date) -> Dict[str, Any] | None:
@@ -689,7 +741,7 @@ class GongService:
         """Returns a list of deal names currently in the cache"""
         return self.champion_cache.keys()
 
-    def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], num_days_back: int = 7) -> List[Dict]:
+    def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], num_days_back: int = 50) -> List[Dict]:
         """
         Get additional meetings from Gong that are not present in HubSpot timeline events.
         
@@ -741,15 +793,10 @@ class GongService:
                     company_name_tokens = company_name_lower.split()
                     title_tokens = call_title.split()
                     
-                    print(Fore.CYAN + f"\nComparing call: '{call_title}'" + Style.RESET_ALL)
-                    print(Fore.CYAN + f"Company name tokens: {company_name_tokens}" + Style.RESET_ALL)
-                    print(Fore.CYAN + f"Title tokens: {title_tokens}" + Style.RESET_ALL)
-                    
                     # Check if any company name token is a substring of any title token
                     is_match = False
                     for company_token in company_name_tokens:
                         for title_token in title_tokens:
-                            print(Fore.YELLOW + f"Checking if '{company_token}' is in '{title_token}'" + Style.RESET_ALL)
                             if company_token in title_token:
                                 print(Fore.GREEN + f"Found substring match: '{company_token}' in '{title_token}'" + Style.RESET_ALL)
                                 is_match = True

@@ -158,7 +158,7 @@ async def get_all_deals():
                 "name": deal.get('deal_name', 'Unnamed Deal'),
                 "createdate": deal.get('created_date'),
                 "stage": deal.get('stage', 'Unknown Stage'),
-                "owner": deal.get('owner', 'Unknown Owner')
+                "owner": "Unknown Owner" if not deal.get('owner') or deal.get('owner') == {} else deal.get('owner')
             }
             for index, deal in enumerate(all_deals)
             if deal.get('deal_name')  # Skip deals without names

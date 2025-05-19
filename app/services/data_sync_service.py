@@ -45,7 +45,7 @@ class DataSyncService:
                 if not deal_name:
                     continue
 
-                print(Fore.YELLOW + f"\n### Syncing Global Data for: {deal_name} ###" + Style.RESET_ALL)
+                print(Fore.YELLOW + f"\n### Syncing Deal Info, Insights & Timeline: {deal_name} ###" + Style.RESET_ALL)
                 
                 self.sync_global_deal_data(deal_name, epoch0)
                 self.sync_company_overviews(deal_name)
@@ -53,7 +53,7 @@ class DataSyncService:
                 current_date = datetime.strptime(epoch0, "%Y-%m-%d")
                 end_date = datetime.strptime(datetime.now().strftime("%Y-%m-%d"), "%Y-%m-%d")
 
-                print(Fore.YELLOW + f"\n### Syncing Meeting Data for: {deal_name} ###" + Style.RESET_ALL)
+                print(Fore.YELLOW + f"\n### Syncing Meeting Data: {deal_name} from {epoch0} to {end_date.strftime('%Y-%m-%d')} ###" + Style.RESET_ALL)
 
                 while current_date <= end_date:
                     current_date_str = current_date.strftime("%Y-%m-%d")
@@ -94,13 +94,6 @@ class DataSyncService:
             return
 
     def _sync_deal_info(self, deal_name: str, company_name: str, stats: Dict) -> None:
-        """
-        Sync deal information to MongoDB
-        Args:
-            deal_name: Full deal name
-            company_name: Extracted company name
-            stats: Statistics dictionary to update
-        """
         try:
 
             hubspot_deal = self._get_hubspot_deal_info(deal_name)
@@ -115,7 +108,6 @@ class DataSyncService:
                     amount = f"${float(amount):,.2f}"
                 except (ValueError, TypeError):
                     amount = "N/A"
-
 
             deal_info = {
                 "deal_id": hubspot_deal.get("dealId", deal_name),  # Use HubSpot ID if available
@@ -176,7 +168,6 @@ class DataSyncService:
             return datetime.now()
 
     def _sync_deal_insights(self, deal_name: str, epoch0: str, stats: Dict) -> None:
-        """Sync deal insights and concerns"""
 
         company_name = extract_company_name(deal_name)
 
@@ -206,7 +197,6 @@ class DataSyncService:
             self.deal_insights_repo.upsert_activity(deal_name, deal_insights_data)
 
     def _create_deal_insights_data(self, deal_name: str, concerns: Dict) -> Dict:
-        """Create activity data structure from concerns"""
         # pricing_concerns should be 1 if any of the concerns have a pricing concern
         pricing_concerns = 0
         for concern in concerns:
@@ -241,7 +231,8 @@ class DataSyncService:
 
         try:
             calls = self.gong_service.list_calls(date_str)
-            call_id = self.gong_service.get_call_id(calls, extract_company_name(deal_name))
+            company_name = extract_company_name(deal_name)
+            call_id = self.gong_service.get_call_id(calls, company_name)
             meetings = self.meeting_insights_repo.find_by_deal_and_date(deal_name, date_str)
             if call_id and not meetings:
                 meeting_id = f"{deal_name}_{date_str}"
@@ -281,7 +272,6 @@ class DataSyncService:
             raise
 
     def _sync_timeline_events(self, deal_name: str) -> None:
-        """Sync timeline events from activities and meetings"""
         try:
             timeline_data = self.hubspot_service.get_deal_timeline(deal_name)
             self.deal_timeline_repo.upsert_timeline(deal_name, timeline_data)
@@ -289,13 +279,12 @@ class DataSyncService:
             print(Fore.RED + f"Error getting timeline data: {str(e)}" + Style.RESET_ALL)
 
     def sync_company_overviews(self, deal_name: str) -> None:
-        """Sync company overviews for a specific deal"""
         try:
             # Extract company name from deal name
             company_name = extract_company_name(deal_name)
             
             if not company_name or company_name == "Unknown Company":
-                print(Fore.RED + f"No valid company name found for deal {deal_name}" + Style.RESET_ALL)
+                print(Fore.RED + f"Could not extract a valid company name for deal {deal_name}" + Style.RESET_ALL)
                 return
             
             # Get company analysis from Firecrawl
@@ -310,12 +299,6 @@ class DataSyncService:
             raise
 
     def sync_single_deal(self, deal_name: str, epoch0: str = "2025-02-15") -> None:
-        """
-        Sync data for a single deal across all collections
-        Args:
-            deal_name: The name of the deal to sync
-            epoch0: The start date for syncing historical data
-        """
         try:
             print(Fore.YELLOW + f"\n### Syncing Global Data for: {deal_name} ###" + Style.RESET_ALL)
             

@@ -764,6 +764,10 @@ class HubspotService:
             gong_meetings_events = self.gong_service.get_additional_meetings(company_name, timeline_events)
             if gong_meetings_events:
                 print(Fore.GREEN + f"Found {len(gong_meetings_events)} additional meetings from Gong" + Style.RESET_ALL)
+
+                for event in gong_meetings_events:
+                    print(Fore.CYAN + f"--> {event.get('name', 'Unnamed Meeting')}" + Style.RESET_ALL)
+
                 timeline_events.extend(gong_meetings_events)
                 
                 # Recalculate end_date to include Gong meetings
