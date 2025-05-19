@@ -188,7 +188,7 @@ async def get_deal_timeline(
         timeline_data = deal_timeline_repo.get_by_deal_id(dealName)
         if not timeline_data:
             return {
-                "events": [],
+                "events": "No events found",
                 "start_date": None,
                 "end_date": None,
                 "deal_id": dealName,
@@ -196,7 +196,7 @@ async def get_deal_timeline(
                     "total_contacts": 0,
                     "champions_count": 0,
                     "meeting_count": 0,
-                    "champions": []
+                    "champions": "No champions found"
                 }
             }
             
@@ -294,9 +294,14 @@ async def get_deal_info(dealName: str = Query(..., description="The name of the 
         start_date = timeline_data.get('start_date') if timeline_data else None
         end_date = timeline_data.get('end_date') if timeline_data else None
         
+        # Replace empty owner with "No Owner Assigned"
+        owner = deal_info.get('owner', 'No Owner Assigned')
+        if not owner or owner == {}:
+            owner = "No Owner Assigned"
+        
         return {
             "dealId": deal_info.get('deal_id', 'Not found'),
-            "dealOwner": deal_info.get('owner', 'Not found'),
+            "dealOwner": owner,
             "dealStage": deal_info.get('stage', 'Unknown'),
             "activityCount": activity_count,
             "startDate": start_date,
@@ -317,7 +322,7 @@ async def get_contacts_and_champion(
         meeting_info = meeting_insights_repo.get_by_deal_id(dealName)
         if not meeting_info:
             return {
-                "contacts": [],
+                "contacts": "No contacts found",
                 "total_contacts": 0,
                 "champions_count": 0
             }
@@ -331,6 +336,14 @@ async def get_contacts_and_champion(
         # Remove duplicates based on email
         unique_champions = {champ["email"]: champ for champ in all_champions}.values()
         champions_count = sum(1 for champ in unique_champions if champ.get("champion", False))
+        
+        # If no champions found, return string instead of empty list
+        if not unique_champions:
+            return {
+                "contacts": "No contacts found",
+                "total_contacts": 0,
+                "champions_count": 0
+            }
         
         return {
             "contacts": list(unique_champions),
@@ -355,9 +368,9 @@ async def get_concerns(
         if not deal_activity:
             print(Fore.YELLOW + f"No deal insights found for: {dealName}" + Style.RESET_ALL)
             return {
-                "pricing_concerns": {"has_concerns": False, "explanation": "No data available"},
-                "no_decision_maker": {"is_issue": False, "explanation": "No data available"},
-                "already_has_vendor": {"has_vendor": False, "explanation": "No data available"}
+                "pricing_concerns": "No pricing concerns data available",
+                "no_decision_maker": "No decision maker data available",
+                "already_has_vendor": "No vendor data available"
             }
             
         # Get the most recent concerns from the concerns array
@@ -365,9 +378,9 @@ async def get_concerns(
         if not concerns:
             print(Fore.YELLOW + f"No concerns data found for: {dealName}" + Style.RESET_ALL)
             return {
-                "pricing_concerns": {"has_concerns": False, "explanation": "No concerns data available"},
-                "no_decision_maker": {"is_issue": False, "explanation": "No concerns data available"},
-                "already_has_vendor": {"has_vendor": False, "explanation": "No concerns data available"}
+                "pricing_concerns": "No concerns data available",
+                "no_decision_maker": "No concerns data available",
+                "already_has_vendor": "No concerns data available"
             }
         else:
             print(Fore.GREEN + f"Found concerns data: {concerns}" + Style.RESET_ALL)
@@ -376,10 +389,22 @@ async def get_concerns(
         latest_concerns = concerns[-1]
         print(Fore.GREEN + f"Found concerns data: {latest_concerns}" + Style.RESET_ALL)
         
+        # Convert any empty dictionaries to strings
+        pricing_concerns = latest_concerns.get('pricing_concerns', "No pricing concerns data")
+        no_decision_maker = latest_concerns.get('no_decision_maker', "No decision maker data")
+        already_has_vendor = latest_concerns.get('already_has_vendor', "No vendor data")
+        
+        if pricing_concerns == {}:
+            pricing_concerns = "No pricing concerns data"
+        if no_decision_maker == {}:
+            no_decision_maker = "No decision maker data"
+        if already_has_vendor == {}:
+            already_has_vendor = "No vendor data"
+        
         response = {
-            "pricing_concerns": latest_concerns.get('pricing_concerns', {"has_concerns": False, "explanation": "No pricing concerns data"}),
-            "no_decision_maker": latest_concerns.get('no_decision_maker', {"is_issue": False, "explanation": "No decision maker data"}),
-            "already_has_vendor": latest_concerns.get('already_has_vendor', {"has_vendor": False, "explanation": "No vendor data"})
+            "pricing_concerns": pricing_concerns,
+            "no_decision_maker": no_decision_maker,
+            "already_has_vendor": already_has_vendor
         }
         print(Fore.GREEN + f"Returning response: {response}" + Style.RESET_ALL)
         return response
