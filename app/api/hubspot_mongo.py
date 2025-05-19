@@ -231,7 +231,7 @@ async def get_deal_timeline(
             # Format the event to match old format
             formatted_event = {
                 "id": event.get('event_id', ''),
-                "engagement_id": event.get('engagement_id', ''),
+                "engagement_id": event.get('engagement_id', '') or '',  # Convert null to empty string
                 "date_str": event_date.strftime('%Y-%m-%d') if event_date else '',
                 "time_str": event_date.strftime('%H:%M') if event_date else '',
                 "type": event.get('event_type', ''),
@@ -281,7 +281,7 @@ async def get_deal_info(dealName: str = Query(..., description="The name of the 
         if not deal_info:
             return {
                 "dealId": "Not found",
-                "dealOwner": "Not found",
+                "dealOwner": "Unknown Owner",
                 "activityCount": 0,
                 "startDate": None,
                 "endDate": None
@@ -294,19 +294,21 @@ async def get_deal_info(dealName: str = Query(..., description="The name of the 
         start_date = timeline_data.get('start_date') if timeline_data else None
         end_date = timeline_data.get('end_date') if timeline_data else None
         
-        # Replace empty owner with "No Owner Assigned"
-        owner = deal_info.get('owner', 'No Owner Assigned')
-        if not owner or owner == {}:
-            owner = "No Owner Assigned"
-        
-        return {
+        # Prepare response
+        response = {
             "dealId": deal_info.get('deal_id', 'Not found'),
-            "dealOwner": owner,
+            "dealOwner": deal_info.get('owner', 'Unknown Owner'),
             "dealStage": deal_info.get('stage', 'Unknown'),
             "activityCount": activity_count,
             "startDate": start_date,
             "endDate": end_date
         }
+        
+        # Ensure dealOwner is never an empty dictionary
+        if response["dealOwner"] == {}:
+            response["dealOwner"] = "Unknown Owner"
+            
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching deal info: {str(e)}")
 
