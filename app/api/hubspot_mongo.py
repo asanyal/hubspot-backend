@@ -847,6 +847,10 @@ async def aggregate_deal_insights(deal_names: List[str]):
                 if not isinstance(concern_data, dict):
                     continue
                     
+                # Map old key name to new key name
+                if concern_type == "already_has_vendor":
+                    concern_type = "using_competitor"
+                    
                 # Initialize list for this concern type if not exists
                 if concern_type not in concern_deals:
                     concern_deals[concern_type] = []
