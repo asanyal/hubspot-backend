@@ -211,11 +211,44 @@ pricing_concerns_prompt = """
 """
 
 no_decision_maker_prompt = """
-    Your task is to analyze the transcripts below and see if there are any decision makers.
-    Note: Galileo is the seller, not the buyer. Only analyze the buyer's concerns.
-    Analyze at the Background & Team Context from the transcripts
-    - If the analysis yields that any of the speakers is a Manager of teams, Director, VP, C-level or Cofounder, then they are a decision maker.
+    Your task is to analyze the transcripts below and see if there are any decision makers on the call.
+    A decision maker is someone that has "AUTHORITY".
+
+    ::::: AUTHORITY :::::
+    How much authority do they (or could they) have on this deal?
+    Low? Medium? High?
+
+    ::::: ROLE :::::
+    How involved are they in this particular decision process?
+    Low? Medium? High?
+
+    Here's an example:
+
+    Let's say I have a director of engineering involved in my deal. 
+    Here's how she stacks up:
+    AUTHORITY: High. Even if she's not a direct decision maker, her voice is respected.
+    ROLE: High. Very involved in the decision process.
+
+    Let's say I have A DIFFERENT Director involved in this deal. 
+
+    Here's how he stacks up:
+    AUTHORITY: Low. Not respected. People don't like him.
+    ROLE: Somewhat high. Involved in the decision process.
+
+    Individual contributors (software engineers, data scientists are very likely not decision makers)
+
+    NOTE
+    Galileo is the seller. Only analyze the buyer's concerns. Analyze at the Background & Team Context from the transcripts
+    - If the analysis yields that any of the speakers has high authority and high role - very likely they are a strong decision maker
+    - If the analysis yields that any of the speakers has low authority and high role - very likely they are still a decision maker
     - If the analysis yields that the they are a developer (engineer), then they are not a decision maker.
+
+    Rank this person based on:
+    - authority: 0-5
+    - role: 0-5
+
+    Whether they are a decision maker or not depends on the average score of the authority and the role.
+    If the score is closer to 5, they will be a decision maker.
 
     Return a JSON with the following fields:
     - no_decision_maker: true or false (use lowercase, JSON boolean values)
@@ -230,10 +263,13 @@ no_decision_maker_prompt = """
 already_has_vendor_prompt = """
     analyze the transcripts below and see if the buyer already has a vendor.
     Vendors can be competitors or tools that are being built internally by the buyer.
-    Note: Galileo is the seller, not the buyer. Only analyze the buyer's concerns.
-    Competitors of Galileo are:
+    NOTE:
+    Galileo is the seller, not the buyer.
+    Galileo cannot be a competitor.
+    Only analyze the buyer's concerns. Competitors of Galileo include:
     - Braintrust
     - LangSmith
+    - Lakera AI
     - Vellum
     - LangFuse
     - Arize or Phoenix

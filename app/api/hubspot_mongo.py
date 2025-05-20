@@ -12,6 +12,7 @@ from app.services.data_sync_service import DataSyncService
 from colorama import Fore, Style, init
 import threading
 import queue
+from pydantic import BaseModel
 
 init()
 
@@ -27,6 +28,9 @@ sync_service = DataSyncService()
 sync_jobs = {}
 sync_job_queue = queue.Queue()
 active_threads = {}
+
+class DealNamesRequest(BaseModel):
+    deal_names: List[str]
 
 def convert_mongo_doc(doc: Dict) -> Dict:
     """Convert MongoDB document to JSON-serializable format"""
@@ -807,3 +811,62 @@ def run_force_meeting_insights_job(job_id: str, deal_names: List[str], epoch0: s
         # Clean up thread reference
         if job_id in active_threads:
             del active_threads[job_id] 
+
+@router.post("/deal-insights-aggregate", response_model=Dict[str, List[str]])
+async def aggregate_deal_insights(deal_names: List[str]):
+    """
+    Aggregate concerns data from deal insights for a list of deals.
+    Returns lists of deal names for each concern type where the concern is true.
+    
+    Example request body:
+    [
+        "MetLife Inc - 001 - Eval/Obs/Protect",
+        "Another Deal Name",
+        "Third Deal Name"
+    ]
+    """
+    print(Fore.BLUE + f"#### Aggregating deal insights for {len(deal_names)} deals" + Style.RESET_ALL)
+    try:
+        # Initialize lists for each concern type
+        concern_deals = {}
+        
+        # Get all deal insights in a single query
+        all_deal_insights = deal_insights_repo.find_many({"deal_id": {"$in": deal_names}})
+        
+        # Process each deal insight
+        for deal_insight in all_deal_insights:
+            deal_name = deal_insight.get('deal_id')
+            if not deal_insight.get('concerns'):
+                continue
+                
+            # Get the most recent concerns (last in the array)
+            latest_concerns = deal_insight['concerns'][-1]
+            
+            # Process each concern type
+            for concern_type, concern_data in latest_concerns.items():
+                if not isinstance(concern_data, dict):
+                    continue
+                    
+                # Initialize list for this concern type if not exists
+                if concern_type not in concern_deals:
+                    concern_deals[concern_type] = []
+                
+                # Get the boolean value based on the key in the concern data
+                # This handles different key names like 'has_concerns', 'is_issue', 'has_vendor'
+                bool_value = None
+                for key in ['has_concerns', 'is_issue', 'has_vendor']:
+                    if key in concern_data:
+                        bool_value = concern_data[key]
+                        break
+                
+                # If the concern is true, add the deal name to the list
+                if bool_value is True:
+                    concern_deals[concern_type].append(deal_name)
+        
+        return concern_deals
+        
+    except Exception as e:
+        print(Fore.RED + f"Error in deal-insights-aggregate endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error aggregating deal insights: {str(e)}") 
