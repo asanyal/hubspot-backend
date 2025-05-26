@@ -3,9 +3,9 @@ import os
 from pathlib import Path
 
 # Add the project root directory to Python path
-project_root = str(Path(__file__).parent.parent.parent)
-if project_root not in sys.path:
-    sys.path.append(project_root)
+# project_root = str(Path(__file__).parent.parent.parent)
+# if project_root not in sys.path:
+#     sys.path.append(project_root)
 
 from colorama import Fore, Style, init
 import requests
@@ -106,15 +106,6 @@ class GongService:
         cache_ttl = getattr(settings, 'GONG_CACHE_TTL', 604800)  # 7 days in seconds
         self.champion_cache = LRUCache(capacity=cache_capacity, ttl=cache_ttl)
 
-    def _normalize_text(self, text: str) -> str:
-        """Normalize text by removing special characters and replacing them with spaces."""
-        # Replace special characters with spaces
-        special_chars = ['<', '>', '/', '-']
-        normalized = text
-        for char in special_chars:
-            normalized = normalized.replace(char, ' ')
-        # Remove extra spaces and convert to lowercase
-        return ' '.join(normalized.split()).lower()
 
     def list_calls(self, call_date) -> List[Dict]:
         url = "https://us-5738.api.gong.io/v2/calls"
@@ -193,14 +184,12 @@ class GongService:
                     return str(call["id"])
 
         # Step 2: If no call title or no exact match
-        normalized_company_name = self._normalize_text(company_name)
         for call in calls:
-            title = self._normalize_text(call.get("title", ""))
-            company_name_tokens = normalized_company_name.split(",")
-            print(Fore.MAGENTA + f"Company name tokens: {company_name_tokens}" + Style.RESET_ALL)
-            for company_token in company_name_tokens:
-                if len(company_token) >= 2 and company_token in title:
-                    print(Fore.GREEN + f"Substring matched: '{company_token}' found in '{title}'" + Style.RESET_ALL)
+            title = call.get("title", "")
+            company_synonyms = company_name.split(",")
+            for company_synonym in company_synonyms:
+                if company_synonym in title.split():
+                    print(Fore.GREEN + f"Substring matched: '{company_synonym}' found in '{title}'" + Style.RESET_ALL)
                     return str(call["id"])
         return None
 
@@ -797,21 +786,16 @@ class GongService:
                         continue
                         
                     # Use the same matching logic as get_call_id
-                    company_name_lower = company_name.lower()
-                    company_name_tokens = company_name_lower.split()
-                    title_tokens = call_title.split()
+                    company_name_synonyms = company_name.lower().split(",")
                     
                     # Check if any company name token is a substring of any title token
                     is_match = False
-                    for company_token in company_name_tokens:
-                        for title_token in title_tokens:
-                            if company_token in title_token:
-                                print(Fore.GREEN + f"Found substring match: '{company_token}' in '{title_token}'" + Style.RESET_ALL)
-                                is_match = True
-                                break
-                        if is_match:
+                    for company_synonym in company_name_synonyms:
+                        if company_synonym in call_title:
+                            print(Fore.GREEN + f"Found substring match: '{company_synonym}' in '{call_title}'" + Style.RESET_ALL)
+                            is_match = True
                             break
-                    
+
                     if not is_match:
                         print(Fore.RED + f"No match found for call: '{call_title}'" + Style.RESET_ALL)
                         continue

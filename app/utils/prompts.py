@@ -158,29 +158,28 @@ parr_principle_prompt = """
 """
 
 buyer_intent_prompt = """
-    Analyze the transcript of a sales call between a potential buyer and Galileo.
+    Analyze the call transcript of a sales call between a potential buyer and Galileo.
 
-    Your goal is to assess the buyer's intent and determine whether the overall engagement is trending positively or negatively.
-
+    Your goal is to assess the buyer's intent in buying Galileo, and determine whether the overall engagement is trending positively or negatively.
     Define intent based strictly on clear evidence of buyer interest or disinterest, not on generic politeness or small talk.
 
-    Positive signals include:
+    Positive (Likely to buy) signals include:
         •	Expressions of urgency
         •	Explicit product enthusiasm or praise
         •	Strong alignment with pain points
         •	Clear ownership of next steps
 
-    Negative signals include:
+    Negative (Less likely to buy) signals include:
         •	Frustration, hesitation, or skepticism
-        •	Confusion about product fit
-        •	Deferral, lack of urgency, or unclear ownership
+        •	Confusion about Galileo's value proposition or how it fits into their workflows
+        •	Lack of urgency
 
     Output must be valid JSON with the following two fields only:
         1.	"intent": One of the following values:
         •	"Less likely to buy"
-        •	"Unsure"
         •	"Neutral"
         •	"Likely to buy"
+
         2.	"explanation": A structured string broken down into the following headers:
         •	Background & Team Context
         •	Current State & Use Cases
@@ -188,10 +187,12 @@ buyer_intent_prompt = """
         •	Positive & Negative Signals
         •	Next Steps & Requirements
 
-    Each section should be concise and grounded only in what is explicitly said in the transcript.
-    Avoid speculation.
-    For ONLY the explanation section, use markdown formatting for the headers, the text etc.
-    Return only the JSON response, no commentary or explanation before or after.
+    INSTRUCTIONS:
+    1. Each section should be pithy and concise (max 1-2 sentences)
+    2. Each section must be grounded only in what is explicitly mentioned in the transcript.
+    3. Avoid any speculation.
+    4. For the explanation, ONLY use markdown formatting for the headers, the text.
+    5. Return only JSON response, no commentary or explanation before or after.
 
     Seller: {seller_name}
     Transcript: {call_transcript}
