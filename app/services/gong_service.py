@@ -1,5 +1,13 @@
-from colorama import Fore, Style, init
+import sys
+import os
+from pathlib import Path
 
+# Add the project root directory to Python path
+project_root = str(Path(__file__).parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+from colorama import Fore, Style, init
 import requests
 import json
 from datetime import datetime, timedelta, timezone
@@ -7,10 +15,6 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Any
 from app.services.llm_service import ask_openai
-
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.core.config import settings
 from app.services.llm_service import ask_anthropic
@@ -176,12 +180,15 @@ class GongService:
 
     def get_call_id(self, calls, company_name, call_title=None) -> str | None:
         """ return the ID of a matching call based on the company_name or call_title """
+        prefixes = ["[Gong] Google Meet:", "[Gong] Zoom:", "[Gong] WebEx:"]
+        
         if call_title:
             # Step 1: If call title exists, try an exact title match
-            normalized_call_title = self._normalize_text(call_title)
+            call_title = next((call_title[len(p):].strip() for p in prefixes if call_title.startswith(p)), call_title)        
+            print(Fore.MAGENTA + f"Searching for call title: {call_title}" + Style.RESET_ALL)
             for call in calls:
-                title = self._normalize_text(call.get("title", ""))
-                if title == normalized_call_title:
+                title = call.get("title", "")
+                if title.lower() == call_title.lower():
                     print(Fore.GREEN + f"Found exact match: '{title}'" + Style.RESET_ALL)
                     return str(call["id"])
 
@@ -189,7 +196,8 @@ class GongService:
         normalized_company_name = self._normalize_text(company_name)
         for call in calls:
             title = self._normalize_text(call.get("title", ""))
-            company_name_tokens = normalized_company_name.split()
+            company_name_tokens = normalized_company_name.split(",")
+            print(Fore.MAGENTA + f"Company name tokens: {company_name_tokens}" + Style.RESET_ALL)
             for company_token in company_name_tokens:
                 if len(company_token) >= 2 and company_token in title:
                     print(Fore.GREEN + f"Substring matched: '{company_token}' found in '{title}'" + Style.RESET_ALL)
@@ -1004,21 +1012,32 @@ class GongService:
             return None
 
 if __name__ == "__main__":
-    gong_service = GongService()
-    
-    date_str = "2025-04-17"
-    call_title = "Pandadoc"
-    
-    print(Fore.YELLOW + "="*100 + Style.RESET_ALL)
-    print(Fore.GREEN + f"Testing get_potential_concerns for {call_title}" + Style.RESET_ALL)
-    print(Fore.YELLOW + "="*100 + Style.RESET_ALL)
-    
 
-    calls = gong_service.list_calls(date_str)
-    call_id = gong_service.get_call_id(calls, call_title)
-    print(Fore.GREEN + f"Found call ID: {call_id}" + Style.RESET_ALL)
+    gong = GongService()
+    
+    test_cases = [
+        {
+            "company_name": extract_company_name("Bank of America - AGI Group - 2025"),
+            "call_title": "Tech",
+            "date": "2025-05-23"
+        }
+    ]
 
-    start_time = f"{date_str}T00:00:00Z"
-    end_time = f"{date_str}T23:59:59Z"
-    transcripts_data = gong_service.get_call_transcripts([call_id], start_time, end_time)
-    print(Fore.GREEN + f"{transcripts_data}" + Style.RESET_ALL)
+    for test in test_cases:
+        print(f"\nTesting with:")
+        print(f"Company: {test['company_name']}")
+        print(f"Call Title: {test['call_title']}")
+        print(f"Date: {test['date']}")
+        
+        # Get calls for the date
+        calls = gong.list_calls(test['date'])
+        print(f"Found {len(calls)} calls for the date")
+
+        for call in calls:
+            print(f"Call: {call['title']}")
+        
+        call_id = gong.get_call_id(calls, test['company_name'], test['call_title'])
+
+        print(f"Result: {'Found' if call_id else 'Not found'}")
+        if call_id:
+            print(f"Call ID: {call_id}")

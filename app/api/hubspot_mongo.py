@@ -873,4 +873,37 @@ async def aggregate_deal_insights(deal_names: List[str]):
         print(Fore.RED + f"Error in deal-insights-aggregate endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error aggregating deal insights: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error aggregating deal insights: {str(e)}")
+
+@router.delete("/delete-deal")
+async def delete_deal(dealName: str = Query(..., description="The name of the deal to delete")):
+    """Delete all deal-related data from MongoDB for a specific deal"""
+    print(Fore.BLUE + f"#### Deleting all data for deal: {dealName}" + Style.RESET_ALL)
+    try:
+        # Delete from each repository
+        deal_info_deleted = deal_info_repo.delete_one({"deal_id": dealName})
+        deal_insights_deleted = deal_insights_repo.delete_one({"deal_id": dealName})
+        deal_timeline_deleted = deal_timeline_repo.delete_one({"deal_id": dealName})
+        meeting_insights_deleted = meeting_insights_repo.delete_many({"deal_id": dealName})
+
+        # Count total documents deleted
+        total_deleted = (
+            (1 if deal_info_deleted else 0) +
+            (1 if deal_insights_deleted else 0) +
+            (1 if deal_timeline_deleted else 0) +
+            meeting_insights_deleted
+        )
+
+        return {
+            "status": "success",
+            "message": f"Successfully deleted {total_deleted} documents for deal: {dealName}",
+            "details": {
+                "deal_info_deleted": bool(deal_info_deleted),
+                "deal_insights_deleted": bool(deal_insights_deleted),
+                "deal_timeline_deleted": bool(deal_timeline_deleted),
+                "meeting_insights_deleted": meeting_insights_deleted
+            }
+        }
+    except Exception as e:
+        print(Fore.RED + f"Error deleting deal data: {str(e)}" + Style.RESET_ALL)
+        raise HTTPException(status_code=500, detail=f"Error deleting deal data: {str(e)}") 

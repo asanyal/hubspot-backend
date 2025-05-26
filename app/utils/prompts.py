@@ -24,45 +24,47 @@ champion_prompt = """
 """
 
 company_name_prompt = """
-    Infer the name of the company from the provided call title or email domain.
+    Infer the name of the company from the provided title.
     Use your knowledge to infer the company being referred to.
     
-    Call title or email domain: {call_title}
+    Title: {call_title}
 
-    RULES:
-    1. If the title contains " - New Deal", extract everything before it
-    2. If the title contains " <> ", extract everything before it
-    3. If the title contains " - ", extract everything before it
-    4. Exclude suffixes like "inc", "llc", "holdings", "technologies", "group", "corp", "company", "corporation" etc. from the company name
-    5. For a healthcare company, exclude "health" or "healthcare" from the company name
-    6. Remove any leading/trailing whitespace
-    7. Return multiple possible variants of the company name, if applicable, such as abbreviations or common short forms (separated by spaces)
-    8. If you cannot find the company name, return "Unknown Company"
-    9. If the email domain is "galileo.ai", return "Unknown Company".
-    10. "Galileo" or "galileo.ai" is not a company.
+    INSTRUCTIONS:
+    1. The returned list should be comma separated.
+    2. If the title contains " - New Deal", extract everything before it
+    3. Exclude suffixes like "inc", "llc", "holdings", "technologies", "group", "corp", "company", "corporation" etc. from the company name
+    4. For a healthcare company, EXCLUDE "health" or "healthcare" from the company name
+    5. Return multiple possible variants of the company name, if applicable, such as abbreviations or common short forms (separated by spaces)
+    6. If you cannot find the company name, return "Unknown Company"
+    7. If the email domain is "galileo.ai", return "Unknown Company".
+    8. Galileo, galileo.ai, Run Galileo, rungalileo.io are not companies.
+    9. EXCLUDE or ignore "Galileo" in all cases.
+    10. Title may also contain a team name 
+    e.g. "Deutsche Bank - Bank on Tech (BOT)". In this case, extract both the company name, the team name and all abbreviations possible e.g. "Deutsche Bank, DB, Bank of Tech, BOT"
 
-    For the following companies, return their short form:
-    - "American Express" -> "Amex"
-    - "Deutsche Bank" -> "DB"
-    - "Deutsche Telekom" -> "DT"
-    - "FreshWorks" -> "FW"
+    For companies that are well known by their short form, INCLUDE the short form in the output (separated by commas):
+    - "American Express" -> "American Express, Amex"
+    - "Deutsche Bank" -> "Deutsche Bank, DB"
+    - "Deutsche Telekom" -> "Deutsche Telekom, DT"
+    - "FreshWorks" -> "FreshWorks, FW"
+    - "Bank of America" -> "Bank of America, BofA"
 
     Some companies have multiple names:
     - "DemandMatrix" -> "DemandBase"
-    
+
     Examples:
     - "Notable - New Deal" -> "Notable"
     - "Intro: Cascade <> Galileo" -> "Cascade"
-    - "Washington Post - New Deal" -> "Washington Post WashPost WaPo"
-    - "General Dynamics Land Systems - New Deal" -> "General Dynamics Land Systems GDLS"
+    - "Intro: Cascade Health <> Galileo" -> "Cascade"
+    - "Washington Post - New Deal" -> "Washington Post, WashPost, WaPo"
+    - "General Dynamics Land Systems - New Deal" -> "General Dynamics Land Systems, GDLS"
     - "Company Name - Some Text" -> "Company Name"
 
     EXCEPTIONS:
     - "ItsaCheckmate" -> "Checkmate"
     
-    ONLY return the name(s) of the company in a format that could include the full name, abbreviation, or any widely recognized short form.
+    ONLY return the name of the company and any short abbreviations (if applicable) in a comma-separated format.
 """
-
 
 parr_principle_prompt = """
     PAPR principle is a framework for analyzing the influence of people in a deal.
