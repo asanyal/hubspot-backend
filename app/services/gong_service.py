@@ -175,7 +175,11 @@ class GongService:
         
         if call_title:
             # Step 1: If call title exists, try an exact title match
-            call_title = next((call_title[len(p):].strip() for p in prefixes if call_title.startswith(p)), call_title)        
+            for prefix in prefixes:
+                if call_title.startswith(prefix):
+                    call_title = call_title[len(prefix):].strip()
+                    break
+
             print(Fore.MAGENTA + f"Searching for call title: {call_title}" + Style.RESET_ALL)
             for call in calls:
                 title = call.get("title", "")
