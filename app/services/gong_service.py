@@ -171,7 +171,7 @@ class GongService:
 
     def get_call_id(self, calls, company_name, call_title=None) -> str | None:
         """ return the ID of a matching call based on the company_name or call_title """
-        prefixes = ["[Gong] Google Meet:", "[Gong] Zoom:", "[Gong] WebEx:"]
+        prefixes = ["[Gong] Google Meet:", "[Gong] Zoom:", "[Gong] WebEx:", "[Gong]"]
         
         if call_title:
             # Step 1: If call title exists, try an exact title match
@@ -791,7 +791,7 @@ class GongService:
                     # Check if any company name token is a substring of any title token
                     is_match = False
                     for company_synonym in company_name_synonyms:
-                        if company_synonym in call_title:
+                        if company_synonym.strip() in call_title.strip():
                             print(Fore.GREEN + f"Found substring match: '{company_synonym}' in '{call_title}'" + Style.RESET_ALL)
                             is_match = True
                             break
