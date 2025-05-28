@@ -5,7 +5,7 @@ from app.services.gong_service import GongService
 from app.services.session_service import SessionService
 from app.services.firecrawl_service import get_company_analysis
 from app.utils.general_utils import extract_company_name
-from app.services.llm_service import ask_anthropic
+from app.services.llm_service import ask_openai
 from collections import Counter
 from datetime import datetime, timedelta
 import requests
@@ -744,7 +744,7 @@ async def ask_customer(request: Request, question: QuestionRequest):
         """
 
         # Get answer from Anthropic
-        answer = ask_anthropic(
+        answer = ask_openai(
             user_content=prompt,
             system_content="You are a smart Sales Analyst that analyzes customer conversations. You work for Galileo."
         )

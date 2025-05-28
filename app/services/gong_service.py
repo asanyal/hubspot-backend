@@ -3,9 +3,9 @@ import os
 from pathlib import Path
 
 # Add the project root directory to Python path
-# project_root = str(Path(__file__).parent.parent.parent)
-# if project_root not in sys.path:
-#     sys.path.append(project_root)
+project_root = str(Path(__file__).parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
 from colorama import Fore, Style, init
 import requests
@@ -17,7 +17,6 @@ from typing import Dict, List, Tuple, Any
 from app.services.llm_service import ask_openai
 
 from app.core.config import settings
-from app.services.llm_service import ask_anthropic
 from app.utils.prompts import champion_prompt, parr_principle_prompt, buyer_intent_prompt, pricing_concerns_prompt, no_decision_maker_prompt, already_has_vendor_prompt
 from app.utils.general_utils import extract_company_name
 
@@ -308,21 +307,21 @@ class GongService:
                         if combined_transcript.strip():
                             # Analyze with each prompt
                             print(Fore.MAGENTA + "Analyzing pricing concerns..." + Style.RESET_ALL)
-                            pricing_response = ask_anthropic(
+                            pricing_response = ask_openai(
                                 user_content=pricing_concerns_prompt.format(transcript=combined_transcript),
                                 system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
                             )
                             pricing_analysis = parse_llm_response(pricing_response, "pricing_concerns")
 
                             print(Fore.MAGENTA + "Analyzing decision maker presence..." + Style.RESET_ALL)
-                            decision_maker_response = ask_anthropic(
+                            decision_maker_response = ask_openai(
                                 user_content=no_decision_maker_prompt.format(transcript=combined_transcript),
                                 system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
                             )
                             decision_maker_analysis = parse_llm_response(decision_maker_response, "no_decision_maker")
 
                             print(Fore.MAGENTA + "Analyzing existing vendor status..." + Style.RESET_ALL)
-                            vendor_response = ask_anthropic(
+                            vendor_response = ask_openai(
                                 user_content=already_has_vendor_prompt.format(transcript=combined_transcript),
                                 system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
                             )
@@ -373,7 +372,7 @@ class GongService:
 
     def get_buyer_intent_json(self, call_transcript, seller_name, call_date_str) -> Dict:
         try:
-            response = ask_anthropic(
+            response = ask_openai(
                 user_content=buyer_intent_prompt.format(call_transcript=call_transcript, seller_name=seller_name),
                 system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
             )
@@ -691,7 +690,7 @@ class GongService:
                     transcript = speaker_transcript["full_transcript"]
 
                     try:
-                        speaker_response = ask_anthropic(
+                        speaker_response = ask_openai(
                             user_content=champion_prompt.format(transcript=transcript),
                             system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
                         ).replace('```json', '').replace('```', '').replace('\n', '').replace('True', 'true').replace('False', 'false').strip()
@@ -699,7 +698,7 @@ class GongService:
                         speaker_response["email"] = speaker_transcript["email"]
                         speaker_response["speakerName"] = speaker_transcript["speakerName"]
 
-                        parr_response = ask_anthropic(
+                        parr_response = ask_openai(
                             user_content=parr_principle_prompt.format(speaker_name=speaker_transcript["speakerName"], transcript=transcript),
                             system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
                         ).replace('```json', '').replace('json', '').replace('```', '').replace('\n', '').replace('True', 'true').replace('False', 'false').strip()
@@ -742,7 +741,7 @@ class GongService:
         """Returns a list of deal names currently in the cache"""
         return self.champion_cache.keys()
 
-    def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], num_days_back: int = 50) -> List[Dict]:
+    def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], num_days_back: int = 1) -> List[Dict]:
         """
         Get additional meetings from Gong that are not present in HubSpot timeline events.
         
@@ -1005,9 +1004,9 @@ if __name__ == "__main__":
     
     test_cases = [
         {
-            "company_name": extract_company_name("Bank of America - AGI Group - 2025"),
-            "call_title": "Tech",
-            "date": "2025-05-23"
+            "company_name": extract_company_name("BrowserStack - New Deal"),
+            "call_title": "",
+            "date": "2025-04-23"
         }
     ]
 

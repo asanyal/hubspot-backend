@@ -1,5 +1,5 @@
 from firecrawl import FirecrawlApp
-from app.services.llm_service import ask_openai, ask_anthropic
+from app.services.llm_service import ask_openai
 import os
 from dotenv import load_dotenv
 import json
@@ -11,7 +11,7 @@ def get_company_analysis(deal_name: str) -> str:
     try:
         app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
 
-        company_name = ask_anthropic(
+        company_name = ask_openai(
             user_content=company_name_prompt.format(call_title=deal_name),
             system_content="You are a smart financial analyst"
         )
