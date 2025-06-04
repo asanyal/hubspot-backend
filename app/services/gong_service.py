@@ -44,66 +44,11 @@ class Speaker:
             "full_transcript": self.full_transcript
         }
 
-class LRUCache:
-    """
-    LRU (Least Recently Used) cache implementation with time-based expiration.
-    """
-    def __init__(self, capacity=100, ttl=86400):  # Default TTL: 24 hours
-        self.cache = OrderedDict()
-        self.capacity = capacity
-        self.ttl = ttl  # Time to live in seconds
-        self.timestamps = {}  # To store when each item was added/updated
-    
-    def get(self, key):
-        if key not in self.cache:
-            return None
-        
-        # Check if the item has expired
-        if time.time() - self.timestamps[key] > self.ttl:
-            self.remove(key)
-            return None
-            
-        # Move the item to the end (most recently used)
-        self.cache.move_to_end(key)
-        return self.cache[key]
-    
-    def put(self, key, value):
-        # If key exists, update its value and move it to the end
-        if key in self.cache:
-            self.cache[key] = value
-            self.cache.move_to_end(key)
-        else:
-            # If cache is full, remove the least recently used item
-            if len(self.cache) >= self.capacity:
-                self.cache.popitem(last=False)
-                
-            # Add the new item
-            self.cache[key] = value
-            
-        # Update the timestamp
-        self.timestamps[key] = time.time()
-    
-    def remove(self, key):
-        if key in self.cache:
-            del self.cache[key]
-            del self.timestamps[key]
-    
-    def keys(self):
-        return list(self.cache.keys())
-    
-    def clear(self):
-        self.cache.clear()
-        self.timestamps.clear()
-
 class GongService:
     def __init__(self):
         self.access_key = settings.GONG_ACCESS_KEY
         self.client_secret = settings.GONG_CLIENT_SECRET
         self.reschedule_window = 1
-
-        cache_capacity = getattr(settings, 'GONG_CACHE_CAPACITY', 100)
-        cache_ttl = getattr(settings, 'GONG_CACHE_TTL', 604800)  # 7 days in seconds
-        self.champion_cache = LRUCache(capacity=cache_capacity, ttl=cache_ttl)
 
 
     def list_calls(self, call_date) -> List[Dict]:
@@ -169,31 +114,29 @@ class GongService:
             return []
 
     def get_call_id(self, calls, company_name, call_title=None) -> str | None:
-        """ return the ID of a matching call based on the company_name or call_title """
+        """Return the ID of a matching call based on company_name or call_title."""
         prefixes = ["[Gong] Google Meet:", "[Gong] Zoom:", "[Gong] WebEx:", "[Gong]"]
         
         if call_title:
-            # Step 1: If call title exists, try an exact title match
             for prefix in prefixes:
                 if call_title.startswith(prefix):
                     call_title = call_title[len(prefix):].strip()
                     break
-
             print(Fore.MAGENTA + f"Searching for call title: {call_title}" + Style.RESET_ALL)
-            for call in calls:
-                title = call.get("title", "")
-                if title.lower() == call_title.lower():
-                    print(Fore.GREEN + f"Found exact match: '{title}'" + Style.RESET_ALL)
-                    return str(call["id"])
 
-        # Step 2: If no call title or no exact match
-        for call in calls:
-            title = call.get("title", "")
-            company_synonyms = company_name.split(",")
-            for company_synonym in company_synonyms:
-                if company_synonym in title.split():
-                    print(Fore.GREEN + f"Substring matched: '{company_synonym}' found in '{title}'" + Style.RESET_ALL)
+            for call in calls:
+                if call.get("title", "").lower() == call_title.lower():
+                    print(Fore.GREEN + f"Found exact match: '{call['title']}'" + Style.RESET_ALL)
                     return str(call["id"])
+        
+        company_synonyms = company_name.split(",")
+        for call in calls:
+            title_words = set(call.get("title", "").split())
+            for synonym in company_synonyms:
+                if synonym in title_words:
+                    print(Fore.GREEN + f"Substring matched: '{synonym}' found in '{call['title']}'" + Style.RESET_ALL)
+                    return str(call["id"])
+        
         return None
 
     def get_call_transcripts(self, call_ids, from_date, to_date) -> Dict[str, Any] | None:
@@ -374,7 +317,7 @@ class GongService:
         try:
             response = ask_openai(
                 user_content=buyer_intent_prompt.format(call_transcript=call_transcript, seller_name=seller_name),
-                system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
+                system_content="You are a smart Sales Analyst that analyzes Sales calls."
             )
             
             # Clean the response by replacing newlines with spaces
@@ -656,10 +599,6 @@ class GongService:
             if company_name == "Unknown Company":
                 return []
 
-            # Check if we have cached results for this deal
-            cache_key = f"{company_name.lower()}_{target_date.strftime('%Y-%m-%d')}"
-            print(Fore.MAGENTA + f"Extracted company name: {company_name}" + Style.RESET_ALL)
-
             if target_date is None:
                 target_date = datetime.now()
             
@@ -671,21 +610,21 @@ class GongService:
             
             # Get speaker data using the new method
             speaker_data = self.get_speaker_data(company_name, start_date, end_date)
-            print(Fore.MAGENTA + f"Champion Extraction: {len(speaker_data)} speaker data retrieved." + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"{len(speaker_data)} speaker data retrieved." + Style.RESET_ALL)
 
             # Convert speaker objects to dictionaries for compatibility
             speaker_transcripts = [speaker.to_dict() for speaker in speaker_data.values()]
 
-            print(Fore.MAGENTA + f"\nChampion Extraction: Total speakers found: {len(speaker_transcripts)} = [{', '.join([speaker['speakerName'] for speaker in speaker_transcripts])}]" + Style.RESET_ALL)
+            print(Fore.MAGENTA + f"\nTotal speakers found: {len(speaker_transcripts)} = [{', '.join([speaker['speakerName'] for speaker in speaker_transcripts])}]" + Style.RESET_ALL)
             if len(speaker_transcripts) == 0:
-                print(Fore.MAGENTA + "Champion Extraction: No speakers found, returning empty response" + Style.RESET_ALL)
+                print(Fore.MAGENTA + "No speakers found, returning empty response" + Style.RESET_ALL)
                 return []
 
             llm_responses = []
-            print(Fore.MAGENTA + f"=== ANALYZING TOP 20 SPEAKERS ===" + Style.RESET_ALL)
-            for speaker_transcript in speaker_transcripts[:20]:
+            print(Fore.MAGENTA + f"=== ANALYZING TOP 8 SPEAKERS ===" + Style.RESET_ALL)
+            for speaker_transcript in speaker_transcripts[:8]:
                 if "galileo" not in speaker_transcript["email"].lower():
-                    print(Fore.MAGENTA + f"Champion Extraction: Analyzing {speaker_transcript['email']}..." + Style.RESET_ALL)
+                    print(Fore.MAGENTA + f"Analyzing {speaker_transcript['email']}..." + Style.RESET_ALL)
 
                     transcript = speaker_transcript["full_transcript"]
 
@@ -714,10 +653,6 @@ class GongService:
 
             print(Fore.MAGENTA + f"\nChampion Extraction: {len(llm_responses)} speakers analyzed" + Style.RESET_ALL)
 
-            # Cache the results with the company name and date as the key
-            self.champion_cache.put(cache_key, llm_responses)
-            print(Fore.MAGENTA + f"Champion Extraction: Cached champion data" + Style.RESET_ALL)
-            
             return llm_responses
             
         except Exception as e:
@@ -726,22 +661,7 @@ class GongService:
             traceback.print_exc()
             return []
 
-    def clear_champion_cache(self) -> None:
-        """Clears the champion cache"""
-        self.champion_cache.clear()
-        print(Fore.MAGENTA + "Champion cache cleared" + Style.RESET_ALL)
-        
-    def remove_from_champion_cache(self, deal_name) -> None:
-        """Removes a specific deal from the champion cache"""
-        key = extract_company_name(deal_name).lower()
-        self.champion_cache.remove(key)
-        print(Fore.MAGENTA + f"Removed '{key}' from champion cache" + Style.RESET_ALL)
-        
-    def get_cached_champion_deals(self) -> List[str]:
-        """Returns a list of deal names currently in the cache"""
-        return self.champion_cache.keys()
-
-    def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], num_days_back: int = 1) -> List[Dict]:
+    def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], lookback_window: int = 1) -> List[Dict]:
         """
         Get additional meetings from Gong that are not present in HubSpot timeline events.
         
@@ -761,13 +681,13 @@ class GongService:
             
             # Calculate date range
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=num_days_back)
+            start_date = end_date - timedelta(days=lookback_window)
             
             # Ensure we're not looking at future dates
             if end_date > datetime.now():
                 end_date = datetime.now()
             if start_date > datetime.now():
-                start_date = datetime.now() - timedelta(days=num_days_back)
+                start_date = datetime.now() - timedelta(days=lookback_window)
             
             print(Fore.MAGENTA + f"Searching for meetings from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}" + Style.RESET_ALL)
             
@@ -858,9 +778,9 @@ class GongService:
                         sentiment = ask_openai(
                             system_content="You are a smart Sales Operations Analyst that analyzes Sales emails.",
                             user_content=f"""
-                            Classify the buyer sentiment in this email as positive (likely to purchase), negative (unlikely to purchase), or neutral (undecided):
+                            Classify the sentiment in this email as positive (likely to buy Galileo), negative (unlikely to buy Galileo), or neutral (no clear indication to buy Galileo):
                             {transcript}
-                            Return only one word: positive, negative, or neutral
+                            Return only one word: positive, negative, neutral
                             """
                         )
                     

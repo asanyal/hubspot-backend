@@ -1,5 +1,12 @@
 import requests
 from datetime import datetime, timezone
+import sys
+import os
+
+# Add the project root directory to Python path when running directly
+if __name__ == "__main__":
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from app.core.config import settings
 from typing import List, Dict, Any, Optional
 from app.utils.general_utils import extract_company_name
@@ -574,7 +581,7 @@ class HubspotService:
             engagement_response = self._session.get(engagement_url) if hasattr(self, '_session') else requests.get(engagement_url, headers=self.headers)
             
             if engagement_response.status_code != 200:
-                print(Fore.CYAN + f"[ERROR][get_deal_timeline] Error fetching engagements: {engagement_response.status_code}" + Style.RESET_ALL)
+                print(Fore.CYAN + f"[ERROR] Error fetching engagements for deal {deal_name}. Error: {engagement_response.status_code}" + Style.RESET_ALL)
                 return {"events": [], "start_date": None, "end_date": None}
             
             engagement_results = engagement_response.json().get("results", [])
@@ -745,8 +752,16 @@ class HubspotService:
                         result = future.result()
                         if result is None:
                             continue
+                        
+                        event = result["event"]
+                        if event is not None and event.get("type") == "Meeting":
                             
-                        timeline_events.append(result["event"])
+                            event['subject'] = event['subject'].replace("[Gong] Google Meet:", "").replace("[Gong] Zoom:", "").replace("[Gong] WebEx:", "").replace("[Gong]", "").strip()
+                            print(Fore.YELLOW + f"Meeting: {event['subject']}" + Style.RESET_ALL)
+                        else:
+                            print("It is not a meeting")
+                        
+                        timeline_events.append(event)
                         date_time = result["date_time"]
                         
                         # Track first and last engagement dates
@@ -982,3 +997,40 @@ class HubspotService:
         except Exception as e:
             print(Fore.RED + f"Exception while fetching engagements: {str(e)}" + Style.RESET_ALL)
             return 0
+
+def main():
+    """Test function for get_deal_timeline"""
+    print(Fore.CYAN + "Testing get_deal_timeline for 'Coveo - New Deal'" + Style.RESET_ALL)
+    
+    # Initialize the service
+    service = HubspotService()
+    
+    # Get timeline for the specified deal
+    timeline = service.get_deal_timeline("Coveo-New Deal")
+    
+    # Print summary information
+    print("\nTimeline Summary:")
+    print(f"Start Date: {timeline.get('start_date', 'N/A')}")
+    print(f"End Date: {timeline.get('end_date', 'N/A')}")
+    print(f"Total Events: {len(timeline.get('events', []))}")
+    
+    # Print champions summary
+    champions_summary = timeline.get('champions_summary', {})
+    print("\nChampions Summary:")
+    print(f"Total Contacts: {champions_summary.get('total_contacts', 0)}")
+    print(f"Champions Count: {champions_summary.get('champions_count', 0)}")
+    print(f"Meeting Count: {champions_summary.get('meeting_count', 0)}")
+    
+    # Print first few events
+    print("\nFirst 3 Events:")
+    for event in timeline.get('events', [])[:3]:
+        print(f"\nDate: {event.get('date_str')} {event.get('time_str')}")
+        print(f"Type: {event.get('type')}")
+        print(f"Subject: {event.get('subject')}")
+        print(f"Sentiment: {event.get('sentiment')}")
+        if event.get('type') == 'Meeting':
+            print(f"Buyer Intent: {event.get('buyer_intent')}")
+            print(f"Buyer Intent Explanation: {event.get('buyer_intent_explanation')}")
+
+if __name__ == "__main__":
+    main()
