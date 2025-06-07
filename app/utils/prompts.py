@@ -1,26 +1,39 @@
 champion_prompt = """
-    You are a smart Sales Operations Analyst that analyzes Sales calls.
-    You are given a transcript of what a potential buyer of Galileo said.
-    Your job is to identify the champion of the call.
+You are a Sales Operations Analyst tasked with analyzing sales call transcripts to identify champions.
 
-    DEFINITION OF CHAMPION:
-    A champion is defined as someone who really loves the product and shows strong intent towards using or buying it. In this case the product is Galileo. Only assign champion as True if someone has sung high praises of the product or has exclaimed a desire to use or buy Galileo.
-    For the explanation, be specific to this peron's thoughts, comments or feelings (whether they are positive or negative).
+You are given a transcript that includes what a potential buyer said during a call about Galileo.
 
-    Analyze the transcript and return a JSON with the following fields:
-    - champion: true or false (use lowercase, JSON boolean values)
-    - explanation: A one-line explanation on why this person is a champion (or not a champion)
+---
 
-    GUIDELINES:
-    1. Base your analysis solely on the evidence in the transcript
-    2. Include specific quotes or paraphrases that justify your conclusion
-    3. Focus on actions and statements that indicate buying influence, not just positive comments
-    4. Consider both explicit statements and implicit indicators of championship
-    
-    Transcript:
-    {transcript}
+**DEFINITION OF A CHAMPION:**  
+A champion is someone who **actively supports** Galileo internally and **demonstrates clear intent to use, advocate for, or help drive the purchase** of the product. Champions often express:
+- Strong personal enthusiasm for Galileo's value
+- Clear alignment with Galileo’s mission or pain points it solves
+- Ownership of next steps (e.g. initiating a trial, sharing with internal stakeholders)
+- Influence within the organization (e.g. decision-making role, introducing Galileo to others)
 
-    STRICTLY return the JSON, nothing else. Use proper JSON boolean values (true/false, not True/False).
+**Important:**  
+Do **not** label someone as a champion just because they are polite or mildly positive. Only mark `true` if there is strong, action-oriented advocacy.
+
+---
+
+**Return this JSON output only:**
+- `"champion"`: `true` or `false` (JSON boolean, lowercase only)
+- `"explanation"`: A single sentence clearly justifying your conclusion. Mention specific quotes or paraphrased comments from the transcript that demonstrate (or disprove) champion behavior.
+
+---
+
+**GUIDELINES:**
+1. Use only the content from the transcript; avoid assumptions.
+2. Look for both **explicit statements** (e.g. "we really want to buy this") and **implicit actions** (e.g. "I'll share this with my VP").
+3. Focus on **buying influence and intent**, not just product appreciation.
+
+---
+
+Transcript:
+{transcript}
+
+STRICTLY return a JSON object. No extra commentary, no markdown. Use proper JSON boolean values (`true` / `false` only).
 """
 
 company_name_prompt = """
@@ -40,6 +53,7 @@ company_name_prompt = """
     8. Galileo, galileo.ai, Run Galileo, rungalileo.io are not companies.
     9. EXCLUDE or ignore "Galileo" in all cases.
     10. Title may also contain a team name 
+    11. Gong, Zoom, Teams are not companies.
     e.g. "Deutsche Bank - Bank on Tech (BOT)". In this case, extract both the company name, the team name and all abbreviations possible e.g. "Deutsche Bank, DB, Bank of Tech, BOT"
 
     For companies that are well known by their short form, INCLUDE the short form in the output (separated by commas):
@@ -158,46 +172,55 @@ parr_principle_prompt = """
 """
 
 buyer_intent_prompt = """
-    Analyze the call transcript of a sales call between a potential buyer and Galileo.
+Analyze the call transcript of a sales meeting between a potential buyer and Galileo.
 
-    Your goal is to assess the buyer's intent in buying Galileo, and determine whether the overall engagement is trending positively or negatively.
-    Define intent based strictly on clear evidence of buyer interest or disinterest, not on generic politeness or small talk.
+Your objective is to **evaluate the buyer's purchasing intent**, based strictly on **explicit, action-oriented signals**, not on tone, politeness, or generic enthusiasm.
 
-    Positive (Likely to buy) signals include:
-        •	Expressions of urgency
-        •	Explicit product enthusiasm or praise
-        •	Strong alignment with pain points
-        •	Clear ownership of next steps
+**Important: Positive sentiment alone is *not* a reliable indicator of buying intent.** Only use clear behavioral or verbal evidence when determining buyer intent.
 
-    Negative (Less likely to buy) signals include:
-        •	Frustration, hesitation, or skepticism
-        •	Confusion about Galileo's value proposition or how it fits into their workflows
-        •	Lack of urgency
+---
 
-    Output must be valid JSON with the following two fields only:
-        1.	"intent": One of the following values:
-        •	"Less likely to buy"
-        •	"Neutral"
-        •	"Likely to buy"
+**Valid buying intent signals (Likely to Buy):**
+- Explicitly asking for pricing, legal/security process, or implementation steps
+- Stating specific pain points that Galileo can solve, with urgency
+- Assigning team members or setting dates to evaluate/test/buy
+- Mentioning budget or decision-making timelines
+- Referencing internal alignment or championing efforts
 
-        2.	"explanation": A structured string broken down into the following headers:
-        •	Background & Team Context
-        •	Current State & Use Cases
-        •	Gap Analysis & Pain Points
-        •	Positive & Negative Signals
-        •	Next Steps & Requirements
+**Valid disinterest signals (Less Likely to Buy):**
+- Expressing confusion about Galileo’s value or differentiation
+- Stalling behavior: no urgency, no follow-up ownership
+- Surface-level compliments with no action or follow-up
+- Redirecting to others without commitment
+- Repeating concerns or blockers without resolution
 
-    INSTRUCTIONS:
-    1. Each section should be pithy and concise (max 1-2 sentences)
-    2. Each section must be grounded only in what is explicitly mentioned in the transcript.
-    3. Avoid any speculation.
-    4. For the explanation, ONLY use markdown formatting for the headers, the text.
-    5. Return only JSON response, no commentary or explanation before or after.
+---
 
-    Seller: {seller_name}
-    Transcript: {call_transcript}
+Return a **valid JSON** object with the following fields:
 
-    STRICTLY return the JSON, nothing prefix or suffix.
+1. "intent": One of these values only  
+   - "Less likely to buy"  
+   - "Neutral"  
+   - "Likely to buy"  
+   **Be conservative** — only mark "Likely to buy" if strong buying actions or commitments are stated.
+
+2. "explanation": Use this structure in markdown formatting. Each section should be strictly 1-2 sentences max and based only on the transcript (no assumptions):
+
+   - ## Background & Team Context  
+   - ## Current State & Use Cases  
+   - ## Gap Analysis & Pain Points  
+   - ## Positive & Negative Signals  
+   - ## Next Steps & Requirements
+
+---
+
+INSTRUCTIONS:
+- Each section must be directly grounded in the transcript, no speculation.
+- Avoid inflating intent due to enthusiasm unless linked to action.
+- Do not include any preamble or explanation — return ONLY the JSON object as output.
+
+Seller: {seller_name}  
+Transcript: {call_transcript}
 """
 
 pricing_concerns_prompt = """

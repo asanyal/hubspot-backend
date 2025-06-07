@@ -12,9 +12,6 @@ from typing import List, Dict, Any, Optional
 from app.utils.general_utils import extract_company_name
 import concurrent.futures
 from app.services.llm_service import ask_openai
-from colorama import Fore, Style, init
-
-init()
 
 class HubspotService:
     _instance = None
@@ -50,9 +47,8 @@ class HubspotService:
             self._deals_cache_ttl = 3600  # 1 hour in seconds
             
             self._initialized = True
-            print(Fore.CYAN + "[SINGLETON] Initialized new HubspotService instance" + Style.RESET_ALL)
         else:
-            print(Fore.CYAN + "[SINGLETON] Reusing existing HubspotService instance" + Style.RESET_ALL)
+            pass
 
     def _initialize_stage_mapping(self):
         """Initialize the mapping of stage IDs to stage names"""
@@ -67,7 +63,6 @@ class HubspotService:
             response = self._session.get(pipelines_url) if hasattr(self, '_session') else requests.get(pipelines_url, headers=self.headers)
             
             if response.status_code != 200:
-                print(f"Error fetching pipelines: {response.status_code}")
                 return
                 
             pipelines = response.json().get("results", [])
@@ -87,10 +82,8 @@ class HubspotService:
                             "closed_lost": stage.get("metadata", {}).get("isClosed", False) and stage.get("metadata", {}).get("probability", 0) == 0,
                         }
         except Exception as e:
-            print(f"Error initializing stage mapping: {str(e)}")
             import traceback
             traceback.print_exc()
-
 
     def get_stage_id_name_mapping(self):
         """Get mapping of stage IDs to stage names"""
@@ -161,8 +154,6 @@ class HubspotService:
 
     def get_deals_by_stage(self, stage_name: str) -> List[Dict[str, Any]]:
         """Get all deals in a specific pipeline stage"""
-        print(Fore.CYAN + f"Getting deals for stage: '{stage_name}'" + Style.RESET_ALL)
-        
         all_deals = []
         after = None
         
@@ -171,7 +162,6 @@ class HubspotService:
             
         while True:
             params = {
-                # "properties": "dealname,dealstage,amount,createdate,closedate,hs_lastmodifieddate,hubspot_owner_id,hs_is_closed_won,hs_is_closed_lost,galileo_exec_sponsor",
                 "limit": "100"
             }
             
@@ -216,7 +206,6 @@ class HubspotService:
                 if not after:
                     break  # No more pages, exit loop
             else:
-                print(f"Error: {response.status_code}, {response.text}")
                 break  # Stop if an error occurs
         
         # Step 2: Now filter by stage with robust matching
@@ -225,28 +214,16 @@ class HubspotService:
         
         # If no deals found, try case-insensitive match
         if not stage_deals:
-            print(Fore.CYAN + f"No exact matches for '{stage_name}', trying case-insensitive match..." + Style.RESET_ALL)
             stage_deals = [deal for deal in all_deals if deal['stage'].lower() == stage_name.lower()]
         
         # If still no deals, try matching with trimmed whitespace
         if not stage_deals:
-            print(Fore.CYAN + f"No case-insensitive matches, trying with trimmed whitespace..." + Style.RESET_ALL)
             stage_deals = [deal for deal in all_deals if deal['stage'].strip() == stage_name.strip()]
         
         # If still no deals, try looser matching (contains)
         if not stage_deals:
-            print(Fore.CYAN + f"No whitespace-trimmed matches, checking if any stage contains '{stage_name}'..." + Style.RESET_ALL)
             stage_deals = [deal for deal in all_deals if stage_name.lower() in deal['stage'].lower()]
             
-            # Print more detailed debug info if we found matches with looser criteria
-            if stage_deals:
-                similar_stages = set(deal['stage'] for deal in stage_deals)
-                print(Fore.CYAN + f"Found similar stages: {similar_stages}" + Style.RESET_ALL)
-        
-        print(Fore.CYAN + f"Found {len(stage_deals)} deals in stage: '{stage_name}'" + Style.RESET_ALL)
-        
-        # Add stage ID debugging info
-        if not stage_deals:
             # Get the stage IDs from the mapping that might match
             potential_stage_ids = []
             if hasattr(self, "_stage_mapping") and self._stage_mapping:
@@ -259,11 +236,6 @@ class HubspotService:
                         stage_name.lower() in stage_label.lower()
                     ):
                         potential_stage_ids.append((stage_id, stage_label))
-            
-            if potential_stage_ids:
-                print(Fore.CYAN + f"Potential matching stage IDs: {potential_stage_ids}" + Style.RESET_ALL)
-            else:
-                print(Fore.CYAN + f"No potential matching stage IDs found in mapping" + Style.RESET_ALL)
         
         if not stage_deals:
             return []
@@ -302,7 +274,6 @@ class HubspotService:
                     "Closed_Lost": "Yes" if deal['is_closed_lost'] == "true" else "No"
                 })
             except Exception as e:
-                print(Fore.RED + f"Error processing deal: {str(e)}" + Style.RESET_ALL)
                 continue
         
         return processed_deals
@@ -371,33 +342,11 @@ class HubspotService:
         """Get all deals from HubSpot with their basic properties, using parallel processing"""
         # Check if we have valid cached data
         current_time = datetime.now().timestamp()
-        print(Fore.CYAN + f"[CACHE CHECK] Current time: {current_time}, Cache timestamp: {self._deals_cache_timestamp}, TTL: {self._deals_cache_ttl}" + Style.RESET_ALL)
-        
         if self._deals_cache is not None:
-            print(Fore.CYAN + f"[CACHE CHECK] Cache exists with {len(self._deals_cache)} deals" + Style.RESET_ALL)
-        else:
-            print(Fore.CYAN + "[CACHE CHECK] No cache exists" + Style.RESET_ALL)
+            if self._deals_cache_timestamp is not None:
+                if current_time - self._deals_cache_timestamp < self._deals_cache_ttl:
+                    return self._deals_cache
             
-        if self._deals_cache_timestamp is not None:
-            print(Fore.CYAN + f"[CACHE CHECK] Cache timestamp exists: {self._deals_cache_timestamp}" + Style.RESET_ALL)
-        else:
-            print(Fore.CYAN + "[CACHE CHECK] No cache timestamp" + Style.RESET_ALL)
-            
-        if (self._deals_cache is not None and 
-            self._deals_cache_timestamp is not None and 
-            current_time - self._deals_cache_timestamp < self._deals_cache_ttl):
-            print(Fore.GREEN + f"[CACHE HIT] Returning cached deals data (age: {int(current_time - self._deals_cache_timestamp)}s)" + Style.RESET_ALL)
-            return self._deals_cache
-        else:
-            if self._deals_cache is None:
-                print(Fore.CYAN + "[CACHE MISS] No cache exists" + Style.RESET_ALL)
-            elif self._deals_cache_timestamp is None:
-                print(Fore.CYAN + "[CACHE MISS] No cache timestamp" + Style.RESET_ALL)
-            else:
-                age = int(current_time - self._deals_cache_timestamp)
-                print(Fore.CYAN + f"[CACHE MISS] Cache expired (age: {age}s, TTL: {self._deals_cache_ttl}s)" + Style.RESET_ALL)
-
-        print(Fore.CYAN + "[CACHE MISS] Fetching fresh deals data" + Style.RESET_ALL)
         deals_url = "https://api.hubapi.com/crm/v3/objects/deals"
         params = {
             "properties": "dealname,dealstage,amount,hs_object_id,hs_lastmodifieddate,createdate,pipeline,closedate,hubspot_owner_id",
@@ -412,7 +361,6 @@ class HubspotService:
             try:
                 response = self._session.get(deals_url, params=page_params)
                 if response.status_code != 200:
-                    print(f"Error fetching deals page: {response.status_code}")
                     return []
                     
                 result = response.json()
@@ -490,7 +438,6 @@ class HubspotService:
                 
                 return deal_data
             except Exception as e:
-                print(f"Error processing deal: {str(e)}")
                 return None
         
         # Process all deals in parallel
@@ -511,105 +458,61 @@ class HubspotService:
                 continue
                 
             if not isinstance(deal, dict):
-                print(f"Warning: Found non-dictionary deal: {type(deal)}, {deal}")
                 continue
                 
             # Additionally verify the deal has required fields
             if not deal.get("dealId") or not deal.get("stage"):
-                print(f"Warning: Deal missing required fields: {deal}")
                 continue
                 
             validated_deals.append(deal)
         
-        print(Fore.CYAN + f"Original deal count: {len(all_deals)}, Validated deal count: {len(validated_deals)}" + Style.RESET_ALL)
-        
         # Cache the validated deals
         self._deals_cache = validated_deals
         self._deals_cache_timestamp = current_time
-        print(Fore.CYAN + f"[CACHE UPDATE] Updated cache with {len(validated_deals)} deals" + Style.RESET_ALL)
         
         return validated_deals
 
     def get_deal_timeline(self, deal_name: str) -> Dict[str, Any]:
         """Get timeline data for a specific deal. Returns email content if include_content is True"""
-        import concurrent.futures
         from datetime import datetime
-        print(Fore.CYAN + f"Getting timeline for deal: {deal_name}" + Style.RESET_ALL)
 
         try:
-            deals_url = "https://api.hubapi.com/crm/v3/objects/deals"
-            params = {"properties": "dealname,id", "limit": "100"}
-
-            all_deals = []
-            after = None
-
-            while True:
-                if after:
-                    params["after"] = after
-                    
-                response = self._session.get(deals_url, params=params) if hasattr(self, '_session') else requests.get(deals_url, headers=self.headers, params=params)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    deals_page = result.get("results", [])
-                    all_deals.extend(deals_page)
-                    
-                    pagination = result.get("paging", {})
-                    if "next" in pagination and "after" in pagination["next"]:
-                        after = pagination["next"]["after"]
-                    else:
-                        break
-                else:
-                    print(Fore.CYAN + f"[ERROR][get_deal_timeline] Error fetching deals: {response.status_code}" + Style.RESET_ALL)
-                    return {"events": [], "start_date": None, "end_date": None}
-            
-            # Find the deal ID by matching deal name
-            deal_id = None
-            for deal in all_deals:
-                if deal.get('properties', {}).get('dealname') == deal_name:
-                    deal_id = deal.get('id')
-                    break
-
+            # Find the deal ID
+            deal_id = self._find_deal_id(deal_name)
             if not deal_id:
-                print(f"Deal with name '{deal_name}' not found.")
                 return {"events": [], "start_date": None, "end_date": None}
             
             # Now fetch activities for this deal
+            print("Getting all engagements from HubSpot for deal: ", deal_name)
             engagement_url = f"https://api.hubapi.com/crm/v3/objects/deals/{deal_id}/associations/engagements"
-            
-            # Use _session if available, otherwise fallback
-            engagement_response = self._session.get(engagement_url) if hasattr(self, '_session') else requests.get(engagement_url, headers=self.headers)
+            engagement_response = self._session.get(engagement_url)
             
             if engagement_response.status_code != 200:
-                print(Fore.CYAN + f"[ERROR] Error fetching engagements for deal {deal_name}. Error: {engagement_response.status_code}" + Style.RESET_ALL)
                 return {"events": [], "start_date": None, "end_date": None}
             
             engagement_results = engagement_response.json().get("results", [])
             engagement_ids = [result.get("id") for result in engagement_results]
             
             if not engagement_ids:
-                print(Fore.CYAN + f"No activities found for deal: {deal_name}" + Style.RESET_ALL)
                 return {"events": [], "start_date": None, "end_date": None}
-            
-            print(Fore.CYAN + f"Found {len(engagement_ids)} activities for this deal" + Style.RESET_ALL)
 
             timeline_events = []
             start_engagement_date = None
             latest_engagement_date = None
+            seen_subjects = set()  # Track seen subjects for deduplication
+            prefixes = ["[Gong] Google Meet:", "[Gong] Zoom:", "[Gong] WebEx:", "[Gong]"]
 
-            # Thread to process engagements in parallel
-            def fetch_and_process_engagement(eng_id):
+            # Process each engagement sequentially
+            for eng_id in engagement_ids:
                 try:
                     detail_url = f"https://api.hubapi.com/crm/v3/objects/engagements/{eng_id}"
                     detail_params = {
                         "properties": "hs_engagement_type,hs_timestamp,hs_email_subject,hs_email_text,hs_note_body,hs_call_body,hs_meeting_title,hs_meeting_body,hs_task_body"
                     }
 
-                    # Use _session if available, otherwise fallback
-                    detail_response = self._session.get(detail_url, params=detail_params) if hasattr(self, '_session') else requests.get(detail_url, headers=self.headers, params=detail_params)
-
+                    detail_response = self._session.get(detail_url, params=detail_params)
                     if detail_response.status_code != 200:
-                        return None
+                        continue
                         
                     details = detail_response.json()
                     props = details.get("properties", {})
@@ -639,7 +542,7 @@ class HubspotService:
                                 except (ValueError, TypeError):
                                     date_time = datetime.now()  # Fallback
                     else:
-                        return None  # Skip events without a timestamp
+                        continue  # Skip events without a timestamp
                     
                     # Get content and subject based on activity type
                     subject = ""
@@ -654,6 +557,7 @@ class HubspotService:
                         display_type = "Call"
                     elif activity_type == "MEETING":
                         subject = props.get('hs_meeting_title', 'Untitled meeting')
+                        print("Meeting. Subject: ", subject)
                         content = props.get('hs_meeting_body', '')
                         display_type = "Meeting"
                     elif activity_type == "TASK":
@@ -670,30 +574,46 @@ class HubspotService:
                         content = ""
                     if subject is None:
                         subject = ""
-                    
+
                     # Create a unique event ID
                     event_id = f"{eng_id}_{date_time.strftime('%Y%m%d%H%M')}"
 
                     buyer_intent = {"intent": "N/A", "explanation": "N/A"}
                     if display_type == "Meeting":
+                        print("Getting the intent analysis data for meeting: ", subject)
                         result = self.gong_service.get_buyer_intent(
-                            call_title=subject.strip(), 
+                            call_title=subject.strip(),
                             call_date=date_time.strftime('%Y-%m-%d'),
                             seller_name="Galileo"
                         )
-                        # Add null check here
                         if result is not None:
                             buyer_intent = result
-                        else:
-                            print(Fore.YELLOW + f"No transcript found for meeting: {subject.strip()} on {date_time.strftime('%Y-%m-%d')}" + Style.RESET_ALL)
-                        
-                    ## content
-                    sentiment = "neutral"
+                            # Convert the explanation dictionary to a structured string
+                            if isinstance(buyer_intent.get("explanation"), dict):
+                                explanation_dict = buyer_intent["explanation"]
+                                sections = []
+                                
+                                # Format each section with clear headers and concise content
+                                if "Background & Team Context" in explanation_dict:
+                                    sections.append(f"# Background & Team Context\n{explanation_dict['Background & Team Context']}")
+                                if "Current State & Use Cases" in explanation_dict:
+                                    sections.append(f"# Current State & Use Cases\n{explanation_dict['Current State & Use Cases']}")
+                                if "Gap Analysis & Pain Points" in explanation_dict:
+                                    sections.append(f"# Gap Analysis & Pain Points\n{explanation_dict['Gap Analysis & Pain Points']}")
+                                if "Positive & Negative Signals" in explanation_dict:
+                                    sections.append(f"# Positive & Negative Signals\n{explanation_dict['Positive & Negative Signals']}")
+                                if "Next Steps & Requirements" in explanation_dict:
+                                    sections.append(f"# Next Steps & Requirements\n{explanation_dict['Next Steps & Requirements']}")
+                                
+                                buyer_intent["explanation"] = "\n\n".join(sections)
+
+                    # Get sentiment for content
+                    sentiment = "Unknown"
                     if content is not None and content != "":
                         # Truncate content to a reasonable length before analysis
                         max_content_length = 15000
                         if len(content) > max_content_length:
-                            content = content[:max_content_length] + "..."
+                            content = content[max_content_length:] + "..."
                             
                         sentiment = ask_openai(
                             system_content="You are a smart Sales Operations Analyst that analyzes Sales emails.",
@@ -708,14 +628,13 @@ class HubspotService:
                         content = ask_openai(
                             system_content="You are a smart Sales Operations Analyst that summarizes Sales emails.",
                             user_content=f"""
-                                Shorten the content of the email to 2 lines: {content}
+                                Shorten the content to 2 lines: {content}
                             """
                         )
 
                     # Prepare content preview
                     content_preview = content[:150] + "..." if len(content) > 150 else content
 
-                    # Create event object
                     event = {
                         "id": event_id,
                         "engagement_id": eng_id,
@@ -730,79 +649,75 @@ class HubspotService:
                         "buyer_intent_explanation": buyer_intent["explanation"]
                     }
                     
-                    return {
-                        "event": event, 
-                        "date_time": date_time
-                    }
-                except Exception as e:
-                    print(Fore.RED + f"[ERROR][get_deal_timeline] Error processing engagement {eng_id}: {str(e)}" + Style.RESET_ALL)
-                    import traceback
-                    traceback.print_exc()
-                    return None
-            
-            # Use thread pool to process engagements in parallel
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                future_to_engagement = {
-                    executor.submit(fetch_and_process_engagement, eng_id): eng_id 
-                    for eng_id in engagement_ids
-                }
-                
-                for future in concurrent.futures.as_completed(future_to_engagement):
-                    try:
-                        result = future.result()
-                        if result is None:
-                            continue
+                    if event.get("type") == "Meeting":
+                        for prefix in prefixes:
+                            event['subject'] = event['subject'].replace(prefix, "").strip()
+                        print("Meeting. Removed prefix from subject: ", event['subject'])
                         
-                        event = result["event"]
-                        if event is not None and event.get("type") == "Meeting":
+                        subject_key = f"{event['subject'].lower().strip()}_{event['date_str']}"
+
+                        if subject_key in seen_subjects:
+                            # Find the existing event with this subject
+                            existing_event = next((e for e in timeline_events if f"{e['subject'].lower().strip()}_{e['date_str']}" == subject_key), None)
                             
-                            event['subject'] = event['subject'].replace("[Gong] Google Meet:", "").replace("[Gong] Zoom:", "").replace("[Gong] WebEx:", "").replace("[Gong]", "").strip()
-                            print(Fore.YELLOW + f"Meeting: {event['subject']}" + Style.RESET_ALL)
+                            if existing_event:
+                                # If existing event has no buyer intent but current event does, update just that field
+                                if (not existing_event.get('buyer_intent_explanation') or 
+                                    existing_event.get('buyer_intent_explanation') == 'N/A' or
+                                    existing_event.get('buyer_intent_explanation') == '') and \
+                                   event.get('buyer_intent_explanation') and \
+                                   event.get('buyer_intent_explanation') != 'N/A':
+                                    print(f"# Updating buyer intent data for meeting: {event['subject']}")
+                                    existing_event['buyer_intent_explanation'] = event['buyer_intent_explanation']
+                                    existing_event['buyer_intent'] = event['buyer_intent']
+                                    print("Old buyer intent: ", existing_event['buyer_intent'])
+                                    print("New buyer intent: ", event['buyer_intent'])
+                                else:
+                                    print(f"Skipping duplicate meeting: {event['subject']}.")
+                                    continue
                         else:
-                            print("It is not a meeting")
-                        
+                            seen_subjects.add(subject_key)
+                            timeline_events.append(event)
+                    else:
                         timeline_events.append(event)
-                        date_time = result["date_time"]
+                    
+                    # Track first and last engagement dates
+                    if start_engagement_date is None or date_time < start_engagement_date:
+                        start_engagement_date = date_time
+                    if latest_engagement_date is None or date_time > latest_engagement_date:
+                        latest_engagement_date = date_time
                         
-                        # Track first and last engagement dates
-                        if start_engagement_date is None or date_time < start_engagement_date:
-                            start_engagement_date = date_time
-                        if latest_engagement_date is None or date_time > latest_engagement_date:
-                            latest_engagement_date = date_time
-                    except Exception as e:
-                        print(Fore.RED + f"[ERROR][get_deal_timeline] Error processing future result: {str(e)}" + Style.RESET_ALL)
-                        continue
+                except Exception as e:
+                    continue
 
             # Get additional meetings from Gong
             company_name = extract_company_name(deal_name)
-            print(Fore.CYAN + f"Fetching additional meetings from Gong for company: {company_name}" + Style.RESET_ALL)
+            print("Getting additional meetings from Gong for company: ", company_name)
             gong_meetings_events = self.gong_service.get_additional_meetings(company_name, timeline_events)
             if gong_meetings_events:
-                print(Fore.GREEN + f"Found {len(gong_meetings_events)} additional meetings from Gong" + Style.RESET_ALL)
-
+                # Add Gong meetings, checking for duplicates
                 for event in gong_meetings_events:
-                    print(Fore.CYAN + f"--> {event.get('name', 'Unnamed Meeting')}" + Style.RESET_ALL)
-
-                timeline_events.extend(gong_meetings_events)
+                    if event.get("type") == "Meeting":
+                        subject_key = f"{event['subject'].lower().strip()}_{event['date_str']}"
+                        if subject_key not in seen_subjects:
+                            timeline_events.append(event)
+                            seen_subjects.add(subject_key)
+                    else:
+                        timeline_events.append(event)
                 
                 # Recalculate end_date to include Gong meetings
                 for event in gong_meetings_events:
                     try:
-                        # Parse the date and make it timezone-aware
                         event_date = datetime.strptime(f"{event['date_str']} {event['time_str']}", "%Y-%m-%d %H:%M")
-                        event_date = event_date.replace(tzinfo=timezone.utc)  # Make it timezone-aware
+                        event_date = event_date.replace(tzinfo=timezone.utc)
                         
-                        # Ensure latest_engagement_date is also timezone-aware
                         if latest_engagement_date and latest_engagement_date.tzinfo is None:
                             latest_engagement_date = latest_engagement_date.replace(tzinfo=timezone.utc)
                             
                         if latest_engagement_date is None or event_date > latest_engagement_date:
                             latest_engagement_date = event_date
                     except (ValueError, TypeError) as e:
-                        print(Fore.YELLOW + f"Could not parse date for Gong event: {str(e)}" + Style.RESET_ALL)
                         continue
-            else:
-                print(Fore.YELLOW + "No additional meetings found in Gong" + Style.RESET_ALL)
 
             # Sort events by date
             timeline_events.sort(key=lambda x: (x["date_str"], x["time_str"]))
@@ -819,12 +734,12 @@ class HubspotService:
             champions_count = sum(1 for champ in unique_champions if champ.get("champion", False))
             total_contacts = len(unique_champions)
             
-            # Ensure all required fields are present and properly formatted
+            # Prepare response
             response = {
                 "events": timeline_events,
                 "start_date": start_engagement_date.strftime('%Y-%m-%d') if start_engagement_date else None,
                 "end_date": latest_engagement_date.strftime('%Y-%m-%d') if latest_engagement_date else None,
-                "deal_id": str(deal_id),  # Ensure deal_id is a string
+                "deal_id": str(deal_id),
                 "champions_summary": {
                     "total_contacts": total_contacts,
                     "champions_count": champions_count,
@@ -840,15 +755,9 @@ class HubspotService:
                 }
             }
             
-            # Validate the response structure
-            if not isinstance(response["events"], list):
-                response["events"] = []
-            if not isinstance(response["champions_summary"]["champions"], list):
-                response["champions_summary"]["champions"] = []
-            
             return response
+            
         except Exception as e:
-            print(Fore.RED + f"[ERROR][get_deal_timeline] Error in get_deal_timeline: {str(e)}" + Style.RESET_ALL)
             import traceback
             traceback.print_exc()
             return {"events": [], "start_date": None, "end_date": None, "error": str(e)}
@@ -860,7 +769,6 @@ class HubspotService:
             self._deal_id_cache = {}
             
         if deal_name in self._deal_id_cache:
-            print(Fore.CYAN + f"[CACHE LOOKUP] Deal ID found in cache: {deal_name}" + Style.RESET_ALL)
             return self._deal_id_cache[deal_name]
             
         # Try direct search first (much faster)
@@ -911,7 +819,6 @@ class HubspotService:
                 else:
                     break
             else:
-                print(Fore.RED + f"[ERROR][get_deal_timeline] Error fetching deals: {response.status_code}" + Style.RESET_ALL)
                 return None
         
         # Find the deal ID by matching deal name
@@ -926,12 +833,9 @@ class HubspotService:
 
     def get_deal_activities_count(self, deal_name: str) -> int:
         """Get the count of activities for a specific deal"""
-        print(Fore.CYAN + f"Getting activities count for deal: {deal_name}" + Style.RESET_ALL)
-
         # First try to get deal ID from cache
         if hasattr(self, '_deal_id_cache') and deal_name in self._deal_id_cache:
             deal_id = self._deal_id_cache[deal_name]
-            print(Fore.CYAN + f"Found deal ID in cache: {deal_id}" + Style.RESET_ALL)
         else:
             # If not in cache, try to find it in the deals cache
             if self._deals_cache is not None:
@@ -940,10 +844,8 @@ class HubspotService:
                         deal_id = deal.get('dealId')
                         if deal_id:
                             self._deal_id_cache[deal_name] = deal_id
-                            print(Fore.CYAN + f"Found deal ID in deals cache: {deal_id}" + Style.RESET_ALL)
                             break
                 else:
-                    print(Fore.YELLOW + f"Deal '{deal_name}' not found in deals cache, fetching fresh data..." + Style.RESET_ALL)
                     # If not found in cache, fetch fresh data
                     deals = self.get_all_deals()
                     for deal in deals:
@@ -951,27 +853,23 @@ class HubspotService:
                             deal_id = deal.get('dealId')
                             if deal_id:
                                 self._deal_id_cache[deal_name] = deal_id
-                                print(Fore.CYAN + f"Found deal ID in fresh data: {deal_id}" + Style.RESET_ALL)
                                 break
                     else:
-                        print(Fore.RED + f"Deal with name '{deal_name}' not found in any cache or fresh data." + Style.RESET_ALL)
                         return 0
             else:
-                print(Fore.RED + "No deals cache available, fetching fresh data..." + Style.RESET_ALL)
                 deals = self.get_all_deals()
                 for deal in deals:
                     if deal.get('dealname') == deal_name:
                         deal_id = deal.get('dealId')
                         if deal_id:
                             self._deal_id_cache[deal_name] = deal_id
-                            print(Fore.CYAN + f"Found deal ID in fresh data: {deal_id}" + Style.RESET_ALL)
                             break
                 else:
-                    print(Fore.RED + f"Deal with name '{deal_name}' not found in fresh data." + Style.RESET_ALL)
+                    print(f"Deal with name '{deal_name}' not found in fresh data.")
                     return 0
 
         if not deal_id:
-            print(Fore.RED + f"Could not find deal ID for deal: {deal_name}" + Style.RESET_ALL)
+            print(f"Could not find deal ID for deal: {deal_name}")
             return 0
 
         # Now fetch activities for this deal
@@ -981,56 +879,25 @@ class HubspotService:
             engagement_response = self._session.get(engagement_url)
             
             if engagement_response.status_code == 404:
-                print(Fore.YELLOW + f"No engagements found for deal: {deal_name}" + Style.RESET_ALL)
                 return 0
                 
             if engagement_response.status_code != 200:
-                print(Fore.RED + f"Error fetching engagements: {engagement_response.status_code}" + Style.RESET_ALL)
                 return 0
             
             engagement_results = engagement_response.json().get("results", [])
             engagement_count = len(engagement_results)
             
-            print(Fore.GREEN + f"Found {engagement_count} activities for deal: {deal_name}" + Style.RESET_ALL)
+            print(f"Found {engagement_count} activities for deal: {deal_name}")
             return engagement_count
             
         except Exception as e:
-            print(Fore.RED + f"Exception while fetching engagements: {str(e)}" + Style.RESET_ALL)
             return 0
 
 def main():
-    """Test function for get_deal_timeline"""
-    print(Fore.CYAN + "Testing get_deal_timeline for 'Coveo - New Deal'" + Style.RESET_ALL)
-    
-    # Initialize the service
     service = HubspotService()
     
-    # Get timeline for the specified deal
     timeline = service.get_deal_timeline("Coveo-New Deal")
-    
-    # Print summary information
-    print("\nTimeline Summary:")
-    print(f"Start Date: {timeline.get('start_date', 'N/A')}")
-    print(f"End Date: {timeline.get('end_date', 'N/A')}")
-    print(f"Total Events: {len(timeline.get('events', []))}")
-    
-    # Print champions summary
-    champions_summary = timeline.get('champions_summary', {})
-    print("\nChampions Summary:")
-    print(f"Total Contacts: {champions_summary.get('total_contacts', 0)}")
-    print(f"Champions Count: {champions_summary.get('champions_count', 0)}")
-    print(f"Meeting Count: {champions_summary.get('meeting_count', 0)}")
-    
-    # Print first few events
-    print("\nFirst 3 Events:")
-    for event in timeline.get('events', [])[:3]:
-        print(f"\nDate: {event.get('date_str')} {event.get('time_str')}")
-        print(f"Type: {event.get('type')}")
-        print(f"Subject: {event.get('subject')}")
-        print(f"Sentiment: {event.get('sentiment')}")
-        if event.get('type') == 'Meeting':
-            print(f"Buyer Intent: {event.get('buyer_intent')}")
-            print(f"Buyer Intent Explanation: {event.get('buyer_intent_explanation')}")
+    print(timeline)
 
 if __name__ == "__main__":
     main()

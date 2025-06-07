@@ -20,7 +20,6 @@ from app.core.config import settings
 from app.utils.prompts import champion_prompt, parr_principle_prompt, buyer_intent_prompt, pricing_concerns_prompt, no_decision_maker_prompt, already_has_vendor_prompt
 from app.utils.general_utils import extract_company_name
 
-import time
 import uuid
 
 init()
@@ -113,7 +112,7 @@ class GongService:
         else:
             return []
 
-    def get_call_id(self, calls, company_name, call_title=None) -> str | None:
+    def get_call_id(self, calls_from_gong, company_name, call_title=None) -> str | None:
         """Return the ID of a matching call based on company_name or call_title."""
         prefixes = ["[Gong] Google Meet:", "[Gong] Zoom:", "[Gong] WebEx:", "[Gong]"]
         
@@ -122,20 +121,22 @@ class GongService:
                 if call_title.startswith(prefix):
                     call_title = call_title[len(prefix):].strip()
                     break
-            print(Fore.MAGENTA + f"Searching for call title: {call_title}" + Style.RESET_ALL)
 
-            for call in calls:
-                if call.get("title", "").lower() == call_title.lower():
-                    print(Fore.GREEN + f"Found exact match: '{call['title']}'" + Style.RESET_ALL)
-                    return str(call["id"])
+            for gong_call in calls_from_gong:
+                gong_call_title = gong_call.get("title", "").lower()
+                for prefix in prefixes:
+                    if gong_call_title.startswith(prefix.lower()):
+                        gong_call_title = gong_call_title[len(prefix):].strip()
+                        break
+                if gong_call_title == call_title.lower():
+                    return str(gong_call["id"])
         
         company_synonyms = company_name.split(",")
-        for call in calls:
-            title_words = set(call.get("title", "").split())
+        for gong_call in calls_from_gong:
+            title_words = set(gong_call.get("title", "").split())
             for synonym in company_synonyms:
                 if synonym in title_words:
-                    print(Fore.GREEN + f"Substring matched: '{synonym}' found in '{call['title']}'" + Style.RESET_ALL)
-                    return str(call["id"])
+                    return str(gong_call["id"])
         
         return None
 
@@ -155,25 +156,20 @@ class GongService:
         if response.ok:
             return response.json()
         else:
-            print(Fore.RED + f"Error fetching transcripts: {response.status_code}, {response.text}" + Style.RESET_ALL)
             return None
 
     def get_concerns(self, call_title: str, call_date: str) -> Dict[str, Any]:
         """Analyze call transcripts for potential concerns using multiple prompts."""
-        print(Fore.MAGENTA + f"Analyzing potential concerns for call: {call_title} on {call_date}" + Style.RESET_ALL)
 
         # Extract company name from call title
         company_name = extract_company_name(call_title)
         if company_name == "Unknown Company" or company_name == "Galileo":
-            print(Fore.RED + f"No company found from call title: {call_title}" + Style.RESET_ALL)
             return {
                 "pricing_concerns": {"has_concerns": False, "explanation": "Could not identify company"},
                 "no_decision_maker": {"is_issue": False, "explanation": "Could not identify company"},
                 "already_has_vendor": {"has_vendor": False, "explanation": "Could not identify company"}
             }
 
-        print(Fore.MAGENTA + f"Extracted company name: {company_name}" + Style.RESET_ALL)
-        
         def parse_llm_response(response: str, default_key: str) -> Dict:
             """Helper function to parse LLM response and handle errors"""
             try:
@@ -191,13 +187,10 @@ class GongService:
                         try:
                             return json.loads(json_match.group(1))
                         except:
-                            print(Fore.RED + f"Error parsing JSON: {response}" + Style.RESET_ALL)
                             return {default_key: False, "explanation": "Could not parse response"}
                     else:
-                        print(Fore.RED + f"Error parsing JSON: {response}" + Style.RESET_ALL)
                         return {default_key: False, "explanation": "Could not parse response"}
             except Exception as e:
-                print(Fore.RED + f"Error processing response: {str(e)}" + Style.RESET_ALL)
                 return {default_key: False, "explanation": f"Error: {str(e)}"}
         
         try:
@@ -211,22 +204,18 @@ class GongService:
             start_date = target_date
             end_date = target_date + timedelta(days=self.reschedule_window)
 
-            print(Fore.MAGENTA + f"Searching for calls from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}" + Style.RESET_ALL)
-            
             # Track all results
             all_results = []
             current_date = start_date
             
             while current_date <= end_date:
                 date_str = current_date.strftime("%Y-%m-%d")
-                print(Fore.MAGENTA + f"\nChecking date: {date_str}" + Style.RESET_ALL)
                 
                 # Get calls for this date
                 calls = self.list_calls(date_str)
                 call_id = self.get_call_id(calls, company_name, call_title=call_title)  # Use company_name instead of call_title
                 
                 if call_id:
-                    print(Fore.GREEN + f"Found call on {date_str}" + Style.RESET_ALL)
                     
                     # Get transcripts
                     start_time = f"{date_str}T00:00:00Z"
@@ -249,21 +238,18 @@ class GongService:
 
                         if combined_transcript.strip():
                             # Analyze with each prompt
-                            print(Fore.MAGENTA + "Analyzing pricing concerns..." + Style.RESET_ALL)
                             pricing_response = ask_openai(
                                 user_content=pricing_concerns_prompt.format(transcript=combined_transcript),
                                 system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
                             )
                             pricing_analysis = parse_llm_response(pricing_response, "pricing_concerns")
 
-                            print(Fore.MAGENTA + "Analyzing decision maker presence..." + Style.RESET_ALL)
                             decision_maker_response = ask_openai(
                                 user_content=no_decision_maker_prompt.format(transcript=combined_transcript),
                                 system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
                             )
                             decision_maker_analysis = parse_llm_response(decision_maker_response, "no_decision_maker")
 
-                            print(Fore.MAGENTA + "Analyzing existing vendor status..." + Style.RESET_ALL)
                             vendor_response = ask_openai(
                                 user_content=already_has_vendor_prompt.format(transcript=combined_transcript),
                                 system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
@@ -300,11 +286,9 @@ class GongService:
 
             # Return the most recent result if multiple calls found
             latest_result = all_results[-1]["result"]
-            print(Fore.MAGENTA + f"Analysis complete. Found {len(all_results)} calls. Returning most recent result." + Style.RESET_ALL)
             return latest_result
 
         except Exception as e:
-            print(Fore.RED + f"Error in get_potential_concerns: {str(e)}" + Style.RESET_ALL)
             import traceback
             traceback.print_exc()
             return {
@@ -335,15 +319,11 @@ class GongService:
                     try:
                         intent_json = json.loads(json_match.group(1))
                     except:
-                        print(Fore.RED + f"Error parsing JSON: {response}" + Style.RESET_ALL)
-                        # If still failing, create a default response
                         intent_json = {
                             "intent": "Unable to determine",
                             "explanation": "Could not parse response"
                         }
                 else:
-                    print(Fore.RED + f"Error parsing JSON: {response}" + Style.RESET_ALL)
-                    # Create default response
                     intent_json = {
                         "intent": "Unable to determine",
                         "explanation": "Could not parse response"
@@ -355,10 +335,8 @@ class GongService:
             if "explanation" not in intent_json:
                 intent_json["explanation"] = "No explanation provided"
                 
-            print(Fore.MAGENTA + f"Buyer Intent (based on call transcript) - call dated {call_date_str}: {intent_json['intent']}" + Style.RESET_ALL)
             return intent_json
         except Exception as e:
-            print(Fore.RED + f"Error in get_buyer_intent_json: {str(e)}" + Style.RESET_ALL)
             return {
                 "intent": "Error",
                 "explanation": f"Error analyzing transcript: {str(e)}"
@@ -395,8 +373,8 @@ class GongService:
                 "explanation": f"No call found on {call_date}"
             }
 
-            calls = self.list_calls(call_date)
-            call_id = self.get_call_id(calls, company_name, call_title)
+            calls_from_gong = self.list_calls(call_date)
+            call_id = self.get_call_id(calls_from_gong, company_name, call_title)
 
             if not call_id:
                 # Try the next day
@@ -404,16 +382,15 @@ class GongService:
                     call_date = datetime.strptime(call_date, "%Y-%m-%d") + timedelta(days=1)
                     call_date = call_date.strftime("%Y-%m-%d")
                     
-                    calls = self.list_calls(call_date) # call again, for the next day
+                    calls_from_gong = self.list_calls(call_date) # call again, for the next day
 
-                    if not calls or len(calls) == 0:
+                    if not calls_from_gong or len(calls_from_gong) == 0:
                         return default_response
                         
-                    call_id = self.get_call_id(calls, company_name, call_title)
+                    call_id = self.get_call_id(calls_from_gong, company_name, call_title)
                     if not call_id:
                         return default_response
                 except Exception as e:
-                    print(Fore.RED + f"Error checking next day: {str(e)}" + Style.RESET_ALL)
                     return default_response
 
             if call_id:
@@ -422,7 +399,6 @@ class GongService:
                 full_transcript, topics = self.get_transcript_and_topics(call_id, start_time, end_time)
 
                 if not full_transcript:
-                    print(Fore.RED + "No transcript found" + Style.RESET_ALL)
                     return {
                         "intent": "No Transcript",
                         "explanation": f"Call found but transcript unavailable for '{call_title}' on {call_date}"
@@ -433,7 +409,6 @@ class GongService:
             
             return default_response
         except Exception as e:
-            print(Fore.RED + f"Error in get_buyer_intent_for_call: {str(e)}" + Style.RESET_ALL)
             return {
                 "intent": "Error",
                 "explanation": f"Error analyzing call: {str(e)}"
@@ -465,7 +440,6 @@ class GongService:
             )
             
             if not response.ok:
-                print(Fore.RED + f"Error fetching calls: {response.status_code}" + Style.RESET_ALL)
                 current_date += timedelta(days=1)
                 continue
                 
@@ -483,9 +457,7 @@ class GongService:
                 if any(token in title_tokens for token in company_name_tokens):
                     matching_calls.append(call)
                     matches += 1
-                    print(Fore.MAGENTA + f"[MATCH] {date_str}: Comparing '{company_name.lower()}' with '{title}'" + Style.RESET_ALL)
 
-            print(Fore.MAGENTA + f"{matches} matching calls found on {date_str}" + Style.RESET_ALL)
             # sort the matching calls by date
             matching_calls.sort(key=lambda x: x.get("startTime", ""))
 
@@ -518,8 +490,6 @@ class GongService:
                 )
                 
                 if not extensive_response.ok:
-                    print(Fore.RED + f"Error fetching extensive data: {extensive_response.status_code}" + Style.RESET_ALL)
-                    print(Fore.RED + f"Response body: {extensive_response.text}" + Style.RESET_ALL)
                     continue
                 
                 speaker_info = {}
@@ -557,8 +527,6 @@ class GongService:
                 )
                 
                 if not transcript_response.ok:
-                    print(Fore.RED + f"Error fetching transcript: {transcript_response.status_code}" + Style.RESET_ALL)
-                    print(Fore.RED + f"Response body: {transcript_response.text}" + Style.RESET_ALL)
                     continue
                     
                 transcript_data = transcript_response.json()
@@ -606,25 +574,19 @@ class GongService:
             start_date = target_date
             end_date = target_date + timedelta(days=self.reschedule_window)
 
-            print(Fore.MAGENTA + f"Champion Extraction: Searching for calls '{company_name}' around {target_date.strftime('%Y-%m-%d')} + {self.reschedule_window} days" + Style.RESET_ALL)
             
             # Get speaker data using the new method
             speaker_data = self.get_speaker_data(company_name, start_date, end_date)
-            print(Fore.MAGENTA + f"{len(speaker_data)} speaker data retrieved." + Style.RESET_ALL)
 
             # Convert speaker objects to dictionaries for compatibility
             speaker_transcripts = [speaker.to_dict() for speaker in speaker_data.values()]
 
-            print(Fore.MAGENTA + f"\nTotal speakers found: {len(speaker_transcripts)} = [{', '.join([speaker['speakerName'] for speaker in speaker_transcripts])}]" + Style.RESET_ALL)
             if len(speaker_transcripts) == 0:
-                print(Fore.MAGENTA + "No speakers found, returning empty response" + Style.RESET_ALL)
                 return []
 
             llm_responses = []
-            print(Fore.MAGENTA + f"=== ANALYZING TOP 8 SPEAKERS ===" + Style.RESET_ALL)
             for speaker_transcript in speaker_transcripts[:8]:
                 if "galileo" not in speaker_transcript["email"].lower():
-                    print(Fore.MAGENTA + f"Analyzing {speaker_transcript['email']}..." + Style.RESET_ALL)
 
                     transcript = speaker_transcript["full_transcript"]
 
@@ -647,35 +609,18 @@ class GongService:
 
                         llm_responses.append(speaker_response)
                     except json.JSONDecodeError as e:
-                        print(Fore.RED + f"Champion Extraction: Error parsing LLM response: {e}" + Style.RESET_ALL)
-                        print(Fore.RED + f"Champion Extraction: Raw response: {speaker_response}" + Style.RESET_ALL)
                         continue
-
-            print(Fore.MAGENTA + f"\nChampion Extraction: {len(llm_responses)} speakers analyzed" + Style.RESET_ALL)
 
             return llm_responses
             
         except Exception as e:
-            print(Fore.RED + f"Champion Extraction: Error in get_speaker_transcripts: {str(e)}" + Style.RESET_ALL)
             import traceback
             traceback.print_exc()
             return []
 
     def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], lookback_window: int = 1) -> List[Dict]:
-        """
-        Get additional meetings from Gong that are not present in HubSpot timeline events.
-        
-        Args:
-            company_name: Name of the company to search for
-            timeline_events: List of existing timeline events from HubSpot
-            num_days_back: Number of days to look back for meetings (default: 7)
-            
-        Returns:
-            List of meeting events in the same format as HubSpot events
-        """
+        print('Timeline event: ', timeline_events[0])
         try:
-            print(Fore.MAGENTA + f"\n=== Fetching Additional Gong Meetings for {company_name} ===" + Style.RESET_ALL)
-            
             # Get existing meeting subjects to avoid duplicates
             existing_subjects = {event.get("subject", "").lower() for event in timeline_events}
             
@@ -689,20 +634,20 @@ class GongService:
             if start_date > datetime.now():
                 start_date = datetime.now() - timedelta(days=lookback_window)
             
-            print(Fore.MAGENTA + f"Searching for meetings from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}" + Style.RESET_ALL)
-            
+            # Track subjects we've already added to prevent duplicates within new meetings
+            added_subjects = set()
             additional_meetings = []
             current_date = start_date
             
             while current_date <= end_date:
                 date_str = current_date.strftime("%Y-%m-%d")
-                print(Fore.MAGENTA + f"\nChecking date: {date_str}" + Style.RESET_ALL)
                 
                 # Get calls for this date
                 calls = self.list_calls(date_str)
                 
                 for call in calls:
                     call_title = call.get("title", "").lower()
+                    print("Call title from Gong: ", call_title)
                     
                     # Skip if call title is empty
                     if not call_title:
@@ -715,21 +660,16 @@ class GongService:
                     is_match = False
                     for company_synonym in company_name_synonyms:
                         if company_synonym.strip() in call_title.strip():
-                            print(Fore.GREEN + f"Found substring match: '{company_synonym}' in '{call_title}'" + Style.RESET_ALL)
                             is_match = True
                             break
 
                     if not is_match:
-                        print(Fore.RED + f"No match found for call: '{call_title}'" + Style.RESET_ALL)
                         continue
                         
-                    print(Fore.GREEN + f"Processing matched call: {call_title}" + Style.RESET_ALL)
-                    # Skip if this meeting already exists in timeline events
-                    if call_title in existing_subjects:
-                        print(Fore.CYAN + f"Skipping duplicate meeting: {call_title}" + Style.RESET_ALL)
+                    # Skip if this meeting already exists in timeline events or has been added
+                    if call_title.strip().lower() in {s.strip().lower() for s in existing_subjects} or call_title.strip().lower() in {s.strip().lower() for s in added_subjects}:
+                        print("Skipping duplicate call title: ", call_title)
                         continue
-                    
-                    print(Fore.GREEN + f"Processing new meeting: {call_title}" + Style.RESET_ALL)
                     
                     # Get call ID and transcript
                     call_id = call.get("id")
@@ -799,16 +739,15 @@ class GongService:
                         "buyer_intent_explanation": buyer_intent.get("explanation", "Not available")
                     }
                     
+                    # Add to our tracking set and list
+                    added_subjects.add(call_title)
                     additional_meetings.append(event)
-                    print(Fore.GREEN + f"Added new meeting: {event['subject']}" + Style.RESET_ALL)
                 
                 current_date += timedelta(days=1)
             
-            print(Fore.MAGENTA + f"\nFound {len(additional_meetings)} additional meetings" + Style.RESET_ALL)
             return additional_meetings
             
         except Exception as e:
-            print(Fore.RED + f"Error in get_additional_meetings: {str(e)}" + Style.RESET_ALL)
             import traceback
             traceback.print_exc()
             return []
@@ -825,8 +764,6 @@ class GongService:
             Dict containing meeting insights including buyer intent and champion analysis
         """
         try:
-            print(Fore.BLUE + f"\n=== Fetching Fresh Meeting Insights from Gong API ===" + Style.RESET_ALL)
-            print(Fore.BLUE + f"Meeting ID: {meeting_id}" + Style.RESET_ALL)
             
             # Get meeting data from Gong API
             url = f"https://us-5738.api.gong.io/v2/calls/extensive"
@@ -846,7 +783,6 @@ class GongService:
                 }
             }
             
-            print(Fore.BLUE + "Making API call to Gong..." + Style.RESET_ALL)
             response = requests.post(
                 url,
                 auth=(self.access_key, self.client_secret),
@@ -855,22 +791,18 @@ class GongService:
             )
             
             if not response.ok:
-                print(Fore.RED + f"Error fetching meeting data from Gong: {response.status_code}" + Style.RESET_ALL)
-                print(Fore.RED + f"Response: {response.text}" + Style.RESET_ALL)
                 return None
                 
             meeting_data = response.json()
             calls = meeting_data.get("calls", [])
             
             if not calls:
-                print(Fore.YELLOW + f"No meeting data found for ID: {meeting_id}" + Style.RESET_ALL)
                 return None
                 
             call = calls[0]  # Get the first (and should be only) call
             
             # Extract company name from call title
             company_name = extract_company_name(call.get("title", ""))
-            print(Fore.MAGENTA + f"Extracted company name from call title: {company_name}" + Style.RESET_ALL)
             
             # Extract transcript and topics
             transcript = ""
@@ -883,7 +815,6 @@ class GongService:
                     topics.append(part["topic"])
             
             # Get buyer intent analysis
-            print(Fore.BLUE + "Analyzing buyer intent from transcript..." + Style.RESET_ALL)
             buyer_intent = self.get_buyer_intent_json(
                 transcript,
                 "Atin Sanyal",  # TODO: Get actual seller name
@@ -891,7 +822,6 @@ class GongService:
             )
             
             # Get champion analysis
-            print(Fore.BLUE + "Analyzing champions from transcript..." + Style.RESET_ALL)
             champions = self.get_champions(
                 call.get("title", ""),
                 datetime.strptime(call.get("startTime", "").split("T")[0], "%Y-%m-%d")
@@ -909,11 +839,9 @@ class GongService:
                 "last_updated": datetime.now(timezone.utc).isoformat()
             }
             
-            print(Fore.GREEN + "Successfully fetched and analyzed meeting insights" + Style.RESET_ALL)
             return insights
             
         except Exception as e:
-            print(Fore.RED + f"Error in get_meeting_insights: {str(e)}" + Style.RESET_ALL)
             import traceback
             traceback.print_exc()
             return None

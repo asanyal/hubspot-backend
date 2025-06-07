@@ -273,6 +273,7 @@ class DataSyncService:
 
     def _sync_timeline_events(self, deal_name: str) -> None:
         try:
+            print(Fore.YELLOW + f"Syncing timeline events for {deal_name}." + Style.RESET_ALL)
             timeline_data = self.hubspot_service.get_deal_timeline(deal_name)
             self.deal_timeline_repo.upsert_timeline(deal_name, timeline_data)
         except Exception as e:
