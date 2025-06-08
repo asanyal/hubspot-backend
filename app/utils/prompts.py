@@ -181,18 +181,18 @@ Your objective is to **evaluate the buyer's purchasing intent**, based strictly 
 ---
 
 **Valid buying intent signals (Likely to Buy):**
-- Explicitly asking for pricing, legal/security process, or implementation steps
+- Explicitly asking for pricing, or implementation steps
 - Stating specific pain points that Galileo can solve, with urgency
 - Assigning team members or setting dates to evaluate/test/buy
 - Mentioning budget or decision-making timelines
 - Referencing internal alignment or championing efforts
 
 **Valid disinterest signals (Less Likely to Buy):**
-- Expressing confusion about Galileo’s value or differentiation
+- Expressing confusion about Galileo's value or differentiation
+- Expressing any kind of frustration
+- Stating they are not a decision maker or their team is not the ideal fit
 - Stalling behavior: no urgency, no follow-up ownership
-- Surface-level compliments with no action or follow-up
-- Redirecting to others without commitment
-- Repeating concerns or blockers without resolution
+- Sharing concerns or blockers to using Galileo
 
 ---
 
@@ -204,7 +204,7 @@ Return a **valid JSON** object with the following fields:
    - "Likely to buy"  
    **Be conservative** — only mark "Likely to buy" if strong buying actions or commitments are stated.
 
-2. "explanation": Use this structure in markdown formatting. Each section should be strictly 1-2 sentences max and based only on the transcript (no assumptions):
+2. "explanation": Use this structure in markdown formatting. Each section should capture as much detail from the call and based only on the transcript (no assumptions):
 
    - ## Background & Team Context  
    - ## Current State & Use Cases  
