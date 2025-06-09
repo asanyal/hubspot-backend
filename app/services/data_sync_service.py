@@ -78,14 +78,9 @@ class DataSyncService:
 
         try:
 
-            company_name = extract_company_name(deal_name)
-            if company_name == "Unknown Company":
-                print(Fore.RED + f"Could not extract company name from deal name: {deal_name}" + Style.RESET_ALL)
-                return
-
-            self._sync_deal_info(deal_name, company_name, stats) ### Global
-            self._sync_deal_insights(deal_name, epoch0, stats) ### Global
-            self._sync_timeline_events(deal_name) ### Global
+            self._sync_deal_info(deal_name, epoch0) ### Global
+            self._sync_deal_insights(deal_name, epoch0) ### Global
+            self._sync_timeline_events(deal_name, epoch0) ### Global
 
             return
 
@@ -93,7 +88,7 @@ class DataSyncService:
             print(Fore.RED + f"Unexpected error in sync_deal_data: {str(e)}" + Style.RESET_ALL)
             return
 
-    def _sync_deal_info(self, deal_name: str, company_name: str, stats: Dict) -> None:
+    def _sync_deal_info(self, deal_name: str, epoch0: str) -> None:
         try:
 
             hubspot_deal = self._get_hubspot_deal_info(deal_name)
@@ -101,6 +96,10 @@ class DataSyncService:
                 print(Fore.RED + f"Could not find deal '{deal_name}' in HubSpot" + Style.RESET_ALL)
                 return
 
+            company_name = extract_company_name(deal_name)
+            if company_name == "Unknown Company":
+                print(Fore.RED + f"Could not extract company name from deal name: {deal_name}" + Style.RESET_ALL)
+                return
 
             amount = hubspot_deal.get("amount", "N/A")
             if amount and amount != "N/A":
@@ -123,7 +122,6 @@ class DataSyncService:
             # Update in MongoDB
             print(Fore.BLUE + f"[MongoDB] Updating DealInfo for {deal_name}." + Style.RESET_ALL)
             self.deal_info_repo.upsert_deal(deal_name, deal_info)
-            stats["deal_info_updated"] = True
 
         except Exception as e:
             print(Fore.RED + f"Error syncing deal info: {str(e)}" + Style.RESET_ALL)
@@ -167,7 +165,7 @@ class DataSyncService:
         except (ValueError, TypeError):
             return datetime.now()
 
-    def _sync_deal_insights(self, deal_name: str, epoch0: str, stats: Dict) -> None:
+    def _sync_deal_insights(self, deal_name: str, epoch0: str) -> None:
 
         company_name = extract_company_name(deal_name)
 
@@ -271,7 +269,7 @@ class DataSyncService:
             print(Fore.RED + f"Error syncing meeting insights for deal {deal_name} on {date_str}: {str(e)}" + Style.RESET_ALL)
             raise
 
-    def _sync_timeline_events(self, deal_name: str) -> None:
+    def _sync_timeline_events(self, deal_name: str, epoch0: str) -> None:
         try:
             print(Fore.YELLOW + f"Syncing timeline events for {deal_name}." + Style.RESET_ALL)
             timeline_data = self.hubspot_service.get_deal_timeline(deal_name)

@@ -473,7 +473,7 @@ class HubspotService:
         return validated_deals
 
     def get_deal_timeline(self, deal_name: str) -> Dict[str, Any]:
-        """Get timeline data for a specific deal. Returns email content if include_content is True"""
+        """Get the full timeline data for a specific deal. Returns email content if include_content is True"""
         from datetime import datetime
 
         try:
