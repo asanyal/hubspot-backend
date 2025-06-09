@@ -8,7 +8,7 @@ You are given a transcript that includes what a potential buyer said during a ca
 **DEFINITION OF A CHAMPION:**  
 A champion is someone who **actively supports** Galileo internally and **demonstrates clear intent to use, advocate for, or help drive the purchase** of the product. Champions often express:
 - Strong personal enthusiasm for Galileo's value
-- Clear alignment with Galileo’s mission or pain points it solves
+- Clear alignment with Galileo's mission or pain points it solves
 - Ownership of next steps (e.g. initiating a trial, sharing with internal stakeholders)
 - Influence within the organization (e.g. decision-making role, introducing Galileo to others)
 
@@ -202,9 +202,11 @@ Return a **valid JSON** object with the following fields:
    - "Less likely to buy"  
    - "Neutral"  
    - "Likely to buy"  
-   **Be conservative** — only mark "Likely to buy" if strong buying actions or commitments are stated.
 
-2. "explanation": Use this structure in markdown formatting. Each section should capture as much detail from the call and based only on the transcript (no assumptions):
+Mark "Likely to buy" if strong buying actions or commitments are stated.
+Mark "Less likely to buy" if the buyer gives a signal of leaning away from Galileo, using a different tool for Evaluation and Observability, or gives signs finding bugs in Galileo, or quotes different priorities for the team.
+
+2. "explanation": Use this structure in markdown formatting. Each section should be comprehensive and capture all the details from the call transcripts (don't skip any information for the sake of brevity). **Wherever possible, mention the names of people in the transcript to provide better context and clarity.**
 
    - ## Background & Team Context  
    - ## Current State & Use Cases  
@@ -218,6 +220,7 @@ INSTRUCTIONS:
 - Each section must be directly grounded in the transcript, no speculation.
 - Avoid inflating intent due to enthusiasm unless linked to action.
 - Do not include any preamble or explanation — return ONLY the JSON object as output.
+- When referencing statements or actions in the explanation, try to attribute them to specific people mentioned in the transcript.
 
 Seller: {seller_name}  
 Transcript: {call_transcript}
@@ -237,53 +240,31 @@ pricing_concerns_prompt = """
 """
 
 no_decision_maker_prompt = """
-    Your task is to analyze the transcripts below and see if there are any decision makers on the call.
-    A decision maker is someone that has "AUTHORITY".
+You are an expert conversation analyst.
 
-    ::::: AUTHORITY :::::
-    How much authority do they (or could they) have on this deal?
-    Low? Medium? High?
+Given the transcript of a sales call, determine whether any **buyer-side** speaker appears to be a decision maker — someone with **clear authority or strong influence** over the buying decision.
 
-    ::::: ROLE :::::
-    How involved are they in this particular decision process?
-    Low? Medium? High?
+Use only the words and behavior in the transcript. Look for:
+- If someone explicitly mentions their title or role in the company as a decision maker (leadership, Director, VP, CXO, etc.)
+- Questions or comments indicating control over priorities, timelines, or budget
+- Statements showing ownership ("I'll approve", "I decide", "We'll buy", "My team will use this")
+- Signs of influence ("Let me talk to the VP", "I'll get this in front of leadership", "We've budgeted for this")
+- Confidence, clarity, or leadership in tone
 
-    Here's an example:
+If no such signals are found, assume no decision maker was present.
 
-    Let's say I have a director of engineering involved in my deal. 
-    Here's how she stacks up:
-    AUTHORITY: High. Even if she's not a direct decision maker, her voice is respected.
-    ROLE: High. Very involved in the decision process.
+Return JSON in this format:
+{
+  "no_decision_maker": true or false,
+  "explanation": "One-line explanation based on transcript"
+}
 
-    Let's say I have A DIFFERENT Director involved in this deal. 
+Only analyze the **buyer** speakers. Do not consider Galileo's team.
 
-    Here's how he stacks up:
-    AUTHORITY: Low. Not respected. People don't like him.
-    ROLE: Somewhat high. Involved in the decision process.
+Transcript:
+{transcript}
 
-    Individual contributors (software engineers, data scientists are very likely not decision makers)
-
-    NOTE
-    Galileo is the seller. Only analyze the buyer's concerns. Analyze at the Background & Team Context from the transcripts
-    - If the analysis yields that any of the speakers has high authority and high role - very likely they are a strong decision maker
-    - If the analysis yields that any of the speakers has low authority and high role - very likely they are still a decision maker
-    - If the analysis yields that the they are a developer (engineer), then they are not a decision maker.
-
-    Rank this person based on:
-    - authority: 0-5
-    - role: 0-5
-
-    Whether they are a decision maker or not depends on the average score of the authority and the role.
-    If the score is closer to 5, they will be a decision maker.
-
-    Return a JSON with the following fields:
-    - no_decision_maker: true or false (use lowercase, JSON boolean values)
-    - explanation: A one-line explanation on why this person is not a decision maker (or is)
-
-    Transcript:
-    {transcript}
-
-    STRICTLY return the JSON, nothing else.
+STRICTLY return only the JSON.
 """
 
 already_has_vendor_prompt = """

@@ -582,30 +582,19 @@ class HubspotService:
                     if display_type == "Meeting":
                         print("Getting the intent analysis data for meeting: ", subject)
                         result = self.gong_service.get_buyer_intent(
-                            call_title=subject.strip(),
+                            call_title=subject.strip(), 
                             call_date=date_time.strftime('%Y-%m-%d'),
                             seller_name="Galileo"
                         )
                         if result is not None:
-                            buyer_intent = result
-                            # Convert the explanation dictionary to a structured string
-                            if isinstance(buyer_intent.get("explanation"), dict):
-                                explanation_dict = buyer_intent["explanation"]
-                                sections = []
-                                
-                                # Format each section with clear headers and concise content
-                                if "Background & Team Context" in explanation_dict:
-                                    sections.append(f"# Background & Team Context\n{explanation_dict['Background & Team Context']}")
-                                if "Current State & Use Cases" in explanation_dict:
-                                    sections.append(f"# Current State & Use Cases\n{explanation_dict['Current State & Use Cases']}")
-                                if "Gap Analysis & Pain Points" in explanation_dict:
-                                    sections.append(f"# Gap Analysis & Pain Points\n{explanation_dict['Gap Analysis & Pain Points']}")
-                                if "Positive & Negative Signals" in explanation_dict:
-                                    sections.append(f"# Positive & Negative Signals\n{explanation_dict['Positive & Negative Signals']}")
-                                if "Next Steps & Requirements" in explanation_dict:
-                                    sections.append(f"# Next Steps & Requirements\n{explanation_dict['Next Steps & Requirements']}")
-                                
-                                buyer_intent["explanation"] = "\n\n".join(sections)
+                            # Only use the result if both intent and explanation are valid
+                            if (result.get("intent") and result.get("intent") != "N/A" and 
+                                result.get("explanation") and result.get("explanation") != "N/A" and
+                                result.get("explanation").strip()):
+                                buyer_intent = result
+                            else:
+                                print(f"Invalid buyer intent data for meeting {subject}: intent={result.get('intent')}, explanation={result.get('explanation')}")
+                                buyer_intent = {"intent": "N/A", "explanation": "N/A"}
 
                     # Get sentiment for content
                     sentiment = "Unknown"
