@@ -306,6 +306,8 @@ class GongService:
             
             # Clean the response by replacing newlines with spaces
             response = response.replace('\n', ' ')
+
+            print(Fore.GREEN + f"Buyer intent response: {response}" + Style.RESET_ALL)
             
             # Try to parse as JSON
             try:

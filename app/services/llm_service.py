@@ -42,7 +42,9 @@ def ask_openai(system_content: str, user_content: str) -> str:
                 {"role": "user", "content": user_content}
             ]
         )
-        return response.choices[0].message.content
+        output = response.choices[0].message.content.replace("```json", "").replace("```", "").replace('\n', ' ').replace("json", "")
+        return output.strip()
+
     except Exception as e:
         if "context_length_exceeded" in str(e):
             print(f"Error: Content too long ({total_tokens} tokens). Attempting to truncate...")

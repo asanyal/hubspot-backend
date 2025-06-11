@@ -172,55 +172,48 @@ parr_principle_prompt = """
 """
 
 buyer_intent_prompt = """
-Analyze the call transcript of a sales meeting between a potential buyer and Galileo.
+Analyze the following sales call transcript between the Galileo team and a potential buyer.
 
-Your objective is to **evaluate the buyer's purchasing intent**, based strictly on **explicit, action-oriented signals**, not on tone, politeness, or generic enthusiasm.
-
-**Important: Positive sentiment alone is *not* a reliable indicator of buying intent.** Only use clear behavioral or verbal evidence when determining buyer intent.
+Your objective is to evaluate the **buyer's purchasing intent**, using only explicit, action-oriented verbal evidence from the transcript. DO NOT infer based on tone, politeness, or vague enthusiasm.
 
 ---
 
-**Valid buying intent signals (Likely to Buy):**
-- Explicitly asking for pricing, or implementation steps
-- Stating specific pain points that Galileo can solve, with urgency
-- Assigning team members or setting dates to evaluate/test/buy
-- Mentioning budget or decision-making timelines
-- Referencing internal alignment or championing efforts
-
-**Valid disinterest signals (Less Likely to Buy):**
-- Expressing confusion about Galileo's value or differentiation
-- Expressing any kind of frustration
-- Stating they are not a decision maker or their team is not the ideal fit
-- Stalling behavior: no urgency, no follow-up ownership
-- Sharing concerns or blockers to using Galileo
+**Important: Do NOT assume intent based on positive sentiment.**  
+Only consider explicit behaviors such as pricing discussions, implementation plans, urgency, or stated blockers.
 
 ---
 
-Return a **valid JSON** object with the following fields:
+**Examples of Strong Buying Intent ("Likely to Buy")**
+- Asking for pricing, pilot, or implementation steps
+- Describing specific, urgent pain points Galileo addresses
+- Assigning team members or setting evaluation/buying timelines
+- Mentioning internal alignment, champions, or budget
 
-1. "intent": One of these values only  
-   - "Less likely to buy"  
-   - "Neutral"  
-   - "Likely to buy"  
-
-Mark "Likely to buy" if strong buying actions or commitments are stated.
-Mark "Less likely to buy" if the buyer gives a signal of leaning away from Galileo, using a different tool for Evaluation and Observability, or gives signs finding bugs in Galileo, or quotes different priorities for the team.
-
-2. "explanation": Use this structure in markdown formatting. Each section should be comprehensive and capture all the details from the call transcripts (don't skip any information for the sake of brevity). **Wherever possible, mention the names of people in the transcript to provide better context and clarity.**
-
-   - ## Background & Team Context  
-   - ## Current State & Use Cases  
-   - ## Gap Analysis & Pain Points  
-   - ## Positive & Negative Signals  
-   - ## Next Steps & Requirements
+**Examples of Disinterest or Blockers ("Less Likely to Buy")**
+- Expressing doubt about Galileo's value or overlap with existing tools
+- Highlighting blockers or bugs
+- Deflecting next steps or commitment
+- Stating misalignment or lack of decision-making power
 
 ---
 
-INSTRUCTIONS:
-- Each section must be directly grounded in the transcript, no speculation.
-- Avoid inflating intent due to enthusiasm unless linked to action.
-- Do not include any preamble or explanation — return ONLY the JSON object as output.
-- When referencing statements or actions in the explanation, try to attribute them to specific people mentioned in the transcript.
+Return a **valid JSON object** with:
+
+1. `"intent"`: Must be one of:
+   - `"Likely to buy"`
+   - `"Neutral"`
+   - `"Less likely to buy"`
+
+2. `"summary"`: A **sectioned markdown-style breakdown**, with headers that best fit this conversation. These should capture core discussion themes and contain **short, precise bullet points** under each header.
+
+   - Do not use fixed headers like "Background" or "Pain Points" — instead, **generate section headers that match the content.**
+   - Bullet points should be objective, factual, and concise.
+   - Where possible, **name specific individuals** in the transcript (e.g., "Vikram mentioned…", "Nikhil asked…").
+   - You may include both technical and business details if relevant.
+
+---
+
+Return ONLY the JSON string. Do not include any additional text or commentary or any prefix or suffix.
 
 Seller: {seller_name}  
 Transcript: {call_transcript}

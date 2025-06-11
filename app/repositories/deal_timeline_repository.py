@@ -31,7 +31,7 @@ class DealTimelineRepository(BaseRepository):
                 "content": event['content'] or event['content_preview'],
                 "sentiment": event['sentiment'],
                 "buyer_intent": event['buyer_intent'],
-                "buyer_intent_explanation": event['buyer_intent_explanation'],
+                "buyer_intent_explanation": event['buyer_intent_explanation'] if isinstance(event['buyer_intent_explanation'], dict) else "N/A",
                 "engagement_id": event['engagement_id']
             }
             transformed_events.append(transformed_event)
@@ -79,7 +79,7 @@ class DealTimelineRepository(BaseRepository):
             "content": event['content'] or event['content_preview'],
             "sentiment": event['sentiment'],
             "buyer_intent": event['buyer_intent'],
-            "buyer_intent_explanation": event['buyer_intent_explanation'],
+            "buyer_intent_explanation": event['buyer_intent_explanation'] if isinstance(event['buyer_intent_explanation'], dict) else "N/A",
             "engagement_id": event['engagement_id']
         }
 

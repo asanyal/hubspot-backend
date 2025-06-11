@@ -589,11 +589,13 @@ class HubspotService:
                         if result is not None:
                             # Only use the result if both intent and explanation are valid
                             if (result.get("intent") and result.get("intent") != "N/A" and 
-                                result.get("explanation") and result.get("explanation") != "N/A" and
-                                result.get("explanation").strip()):
-                                buyer_intent = result
+                                result.get("summary") and isinstance(result.get("summary"), dict)):
+                                buyer_intent = {
+                                    "intent": result.get("intent", "N/A"),
+                                    "explanation": result.get("summary", {})
+                                }
                             else:
-                                print(f"Invalid buyer intent data for meeting {subject}: intent={result.get('intent')}, explanation={result.get('explanation')}")
+                                print(f"Invalid buyer intent data for meeting {subject}: intent={result.get('intent')}, summary={result.get('summary')}")
                                 buyer_intent = {"intent": "N/A", "explanation": "N/A"}
 
                     # Get sentiment for content

@@ -244,7 +244,7 @@ async def get_deal_timeline(
                 "content_preview": event.get('content_preview', ''),
                 "sentiment": event.get('sentiment', 'neutral'),
                 "buyer_intent": event.get('buyer_intent', 'N/A'),
-                "buyer_intent_explanation": event.get('buyer_intent_explanation', 'N/A')
+                "buyer_intent_explanation": event.get('buyer_intent_explanation', 'N/A') if isinstance(event.get('buyer_intent_explanation'), dict) else 'N/A'
             }
             formatted_events.append(formatted_event)
 
