@@ -1277,3 +1277,48 @@ def run_sync_all_stages_on_date(job_id: str, date_str: str):
     finally:
         if job_id in active_threads:
             del active_threads[job_id] 
+
+@router.post("/sync/all-stages/yesterday", status_code=202)
+async def sync_all_stages_yesterday(background_tasks: BackgroundTasks):
+    """Sync all deals across all stages for yesterday's date"""
+    try:
+        # Calculate yesterday's date
+        yesterday = datetime.now() - timedelta(days=1)
+        date_str = yesterday.strftime("%Y-%m-%d")
+
+        # Generate a unique job ID
+        job_id = f"sync_all_stages_yesterday_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
+        
+        # Initialize job status
+        sync_jobs[job_id] = {
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "date_str": date_str,
+            "cancelled": False,
+            "type": "sync_all_stages_yesterday"
+        }
+
+        # Start the sync job in a background thread
+        thread = threading.Thread(
+            target=run_sync_all_stages_on_date,
+            args=(job_id, date_str)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        # Store thread reference for potential cancellation
+        active_threads[job_id] = thread
+
+        print(Fore.MAGENTA + f"Syncing all stages for date: {date_str}" + Style.RESET_ALL)
+
+        return {
+            "status": "accepted",
+            "message": "Sync job started",
+            "job_id": job_id
+        }
+
+    except Exception as e:
+        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}") 
