@@ -339,7 +339,6 @@ async def get_contacts_and_champion(
 async def get_concerns(
     dealName: str = Query(..., description="The name of the deal"),
 ):
-    """Get potential concerns analysis for a specific deal"""
     print(Fore.BLUE + f"#### Getting concerns for deal: {dealName}." + Style.RESET_ALL)
     try:
         # Get deal insights
@@ -351,9 +350,8 @@ async def get_concerns(
                 "no_decision_maker": "No data",
                 "already_has_vendor": "No data"
             }
-            
-        # Get the concerns object directly
-        concerns = deal_activity.get('concerns', {})
+
+        concerns = deal_activity.get("concerns", {})
         if not concerns:
             print(Fore.YELLOW + f"No concerns data found for: {dealName}" + Style.RESET_ALL)
             return {
@@ -361,22 +359,39 @@ async def get_concerns(
                 "no_decision_maker": "No data",
                 "already_has_vendor": "No data"
             }
-            
-        print(Fore.GREEN + f"Found concerns data: {concerns}" + Style.RESET_ALL)
-        
-        # Extract each concern type with their full data
-        pricing_concerns = concerns.get('pricing_concerns', {})
-        no_decision_maker = concerns.get('no_decision_maker', {})
-        already_has_vendor = concerns.get('already_has_vendor', {})
-        
+
+        concerns_list = concerns if isinstance(concerns, list) else [concerns]
+
+        def process_concern(field_name, bool_key):
+            true_explanations = []
+            false_explanations = []
+            has_true = False
+
+            for c in concerns_list:
+                field = c.get(field_name, {})
+                value = field.get(bool_key)
+                explanation = field.get("explanation", "")
+
+                if value:
+                    has_true = True
+                    true_explanations.append(explanation)
+                elif value is False:
+                    false_explanations.append(explanation)
+
+            if has_true:
+                return {bool_key: True, "explanation": " ".join(true_explanations).strip()}
+            else:
+                return {bool_key: False, "explanation": " ".join(false_explanations).strip()}
+
         response = {
-            "pricing_concerns": pricing_concerns,
-            "no_decision_maker": no_decision_maker,
-            "already_has_vendor": already_has_vendor
+            "pricing_concerns": process_concern("pricing_concerns", "has_concerns"),
+            "no_decision_maker": process_concern("no_decision_maker", "is_issue"),
+            "already_has_vendor": process_concern("already_has_vendor", "has_vendor"),
         }
+
         print(Fore.GREEN + f"Returning response: {response}" + Style.RESET_ALL)
         return response
-        
+
     except Exception as e:
         print(Fore.RED + f"Error in get-concerns endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
@@ -776,61 +791,73 @@ def run_force_meeting_insights_job(job_id: str, deal_names: List[str], epoch0: s
 
 @router.post("/deal-insights-aggregate", response_model=Dict[str, List[str]])
 async def aggregate_deal_insights(deal_names: List[str]):
-    """
-    Aggregate concerns data from deal insights for a list of deals.
-    Returns lists of deal names for each concern type where the concern is true.
-    
-    Example request body:
-    [
-        "MetLife Inc - 001 - Eval/Obs/Protect",
-        "Another Deal Name",
-        "Third Deal Name"
-    ]
-    """
     print(Fore.BLUE + f"#### Aggregating deal insights for {len(deal_names)} deals" + Style.RESET_ALL)
     try:
-        # Initialize lists for each concern type
-        concern_deals = {}
-        
-        # Get all deal insights in a single query
+        concern_deals = {
+            "pricing_concerns": [],
+            "pricing_concerns_no_data": [],
+            "no_decision_maker": [],
+            "no_decision_maker_no_data": [],
+            "using_competitor": [],
+            "using_competitor_no_data": []
+        }
+
         all_deal_insights = deal_insights_repo.find_many({"deal_id": {"$in": deal_names}})
-        
-        # Process each deal insight
+
         for deal_insight in all_deal_insights:
-            deal_name = deal_insight.get('deal_id')
-            if not deal_insight.get('concerns'):
+            deal_name = deal_insight.get("deal_id")
+            concerns = deal_insight.get("concerns")
+
+            if not concerns:
+                # No concerns at all → mark as no data across all types
+                concern_deals["pricing_concerns_no_data"].append(deal_name)
+                concern_deals["no_decision_maker_no_data"].append(deal_name)
+                concern_deals["using_competitor_no_data"].append(deal_name)
                 continue
-                
-            # Get the most recent concerns (last in the array)
-            latest_concerns = deal_insight['concerns'][-1]
-            
-            # Process each concern type
-            for concern_type, concern_data in latest_concerns.items():
-                if not isinstance(concern_data, dict):
+
+            concerns_list = concerns if isinstance(concerns, list) else [concerns]
+
+            # Track if any data was seen for each concern type
+            flags = {
+                "pricing_concerns": {"found": False, "triggered": False},
+                "no_decision_maker": {"found": False, "triggered": False},
+                "using_competitor": {"found": False, "triggered": False}
+            }
+
+            for concern in concerns_list:
+                if not isinstance(concern, dict):
                     continue
-                    
-                # Map old key name to new key name
-                if concern_type == "already_has_vendor":
-                    concern_type = "using_competitor"
-                    
-                # Initialize list for this concern type if not exists
-                if concern_type not in concern_deals:
-                    concern_deals[concern_type] = []
-                
-                # Get the boolean value based on the key in the concern data
-                # This handles different key names like 'has_concerns', 'is_issue', 'has_vendor'
-                bool_value = None
-                for key in ['has_concerns', 'is_issue', 'has_vendor']:
-                    if key in concern_data:
-                        bool_value = concern_data[key]
-                        break
-                
-                # If the concern is true, add the deal name to the list
-                if bool_value is True:
-                    concern_deals[concern_type].append(deal_name)
-        
+
+                for concern_type, concern_data in concern.items():
+                    if not isinstance(concern_data, dict):
+                        continue
+
+                    mapped_type = "using_competitor" if concern_type == "already_has_vendor" else concern_type
+                    if mapped_type not in flags:
+                        continue
+
+                    flags[mapped_type]["found"] = True
+
+                    value = None
+                    if concern_type == "pricing_concerns":
+                        value = concern_data.get("has_concerns", False)
+                    elif concern_type == "no_decision_maker":
+                        value = concern_data.get("is_issue", False)
+                    elif concern_type == "already_has_vendor":
+                        value = concern_data.get("has_vendor", False)
+
+                    if value is True:
+                        if not flags[mapped_type]["triggered"]:
+                            concern_deals[mapped_type].append(deal_name)
+                            flags[mapped_type]["triggered"] = True
+
+            # Add to *_no_data if no info seen at all
+            for key, info in flags.items():
+                if not info["found"]:
+                    concern_deals[f"{key}_no_data"].append(deal_name)
+
         return concern_deals
-        
+
     except Exception as e:
         print(Fore.RED + f"Error in deal-insights-aggregate endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
