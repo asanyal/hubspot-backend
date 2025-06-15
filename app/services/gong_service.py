@@ -773,35 +773,3 @@ class GongService:
         }
 
         return insights
-            
-
-if __name__ == "__main__":
-
-    gong = GongService()
-    
-    test_cases = [
-        {
-            "company_name": extract_company_name("BrowserStack - New Deal"),
-            "call_title": "",
-            "date": "2025-04-23"
-        }
-    ]
-
-    for test in test_cases:
-        print(f"\nTesting with:")
-        print(f"Company: {test['company_name']}")
-        print(f"Call Title: {test['call_title']}")
-        print(f"Date: {test['date']}")
-        
-        # Get calls for the date
-        calls = gong.list_calls(test['date'])
-        print(f"Found {len(calls)} calls for the date")
-
-        for call in calls:
-            print(f"Call: {call['title']}")
-        
-        call_id = gong.get_call_id(calls, test['company_name'], test['call_title'])
-
-        print(f"Result: {'Found' if call_id else 'Not found'}")
-        if call_id:
-            print(f"Call ID: {call_id}")

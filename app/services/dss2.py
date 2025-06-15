@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from app.services.gong_service import GongService
@@ -10,6 +10,7 @@ from app.repositories.meeting_insights_repository import MeetingInsightsReposito
 from app.utils.general_utils import extract_company_name
 from app.services.hubspot_service import HubspotService
 from colorama import Fore, Style
+import time
 
 class DataSyncService2:
 
@@ -21,42 +22,94 @@ class DataSyncService2:
         self.deal_timeline_repo = DealTimelineRepository()
         self.meeting_insights_repo = MeetingInsightsRepository()
 
-    def sync(self, date_str: str, stage: str = "all", deal_name: Optional[str] = None) -> None:
+    def sync_stage_on_date(self, stage_name: str, date_str: str) -> None:
+        """Sync all deals in a specific stage for a single date"""
+        print(Fore.MAGENTA + f"Syncing data for stage: {stage_name}, date: {date_str}" + Style.RESET_ALL)
+        
+        all_deals = self.hubspot_service.get_all_deals()
+        filtered_deals = [deal for deal in all_deals if deal.get("stage", "").lower() == stage_name.lower()]
+        print(Fore.MAGENTA + f"Filtered to {len(filtered_deals)} deals in stage: {stage_name}" + Style.RESET_ALL)
 
-        if deal_name:
-            print(Fore.YELLOW + f"Syncing data for DEAL: {deal_name}, DATE: {date_str}" + Style.RESET_ALL)
-        else:
-            print(Fore.MAGENTA + f"Syncing data for date: {date_str}, stage: {stage}" + Style.RESET_ALL)
-
-        if deal_name:
+        for deal in filtered_deals:
             try:
-                # 1. Sync deal info if it's a new deal
-                print('## Syncing deal_info')
+                deal_name = deal.get("dealname")
+                if not deal_name:
+                    continue
+
+                print(Fore.YELLOW + f"\nProcessing deal: {deal_name}" + Style.RESET_ALL)
                 self._sync_deal_info(deal_name)
-
-                # 2. Sync deal insights
-                print('## Syncing deal_insights')
                 self._sync_deal_insights(deal_name, date_str)
-
-                # 3. Sync timeline events
-                print('## Syncing deal_timeline')
                 self._sync_timeline_events(deal_name, date_str)
-
-                # 4. Sync meeting insights
-                print('## Syncing meeting_insights')
                 self._sync_meeting_insights(deal_name, date_str)
+
             except Exception as e:
                 print(Fore.RED + f"Error processing deal {deal_name}: {str(e)}" + Style.RESET_ALL)
+                continue
+        print(Fore.GREEN + f"Successfully synced stage {stage_name} for date: {date_str}" + Style.RESET_ALL)
 
-            print(Fore.YELLOW + f"Successfully synced deal {deal_name}" + Style.RESET_ALL)
+    def sync_stage_date_range(self, stage_name: str, start_date: str, end_date: str) -> None:
+        """Sync all deals in a specific stage for a date range"""
+        print(Fore.MAGENTA + f"Syncing data for stage: {stage_name}, from {start_date} to {end_date}" + Style.RESET_ALL)
+        
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        current_date = start
 
-            return
+        while current_date <= end:
+            current_date_str = current_date.strftime("%Y-%m-%d")
+            self.sync_stage_on_date(stage_name, current_date_str)
+            current_date += timedelta(days=1)
 
+        print(Fore.GREEN + f"Successfully synced stage {stage_name} for date range: {start_date} to {end_date}" + Style.RESET_ALL)
+
+
+    def sync_deal_on_date(self, deal_name: str, date_str: str) -> None:
+        """Sync a specific deal for a single date"""
+        print(Fore.YELLOW + f"Syncing data for DEAL: {deal_name}, DATE: {date_str}" + Style.RESET_ALL)
+        
+        try:
+            # 1. Sync deal info if it's a new deal
+            print('## Syncing deal_info')
+            self._sync_deal_info(deal_name)
+
+            # 2. Sync deal insights
+            print('## Syncing deal_insights')
+            self._sync_deal_insights(deal_name, date_str)
+
+            # 3. Sync timeline events
+            print('## Syncing deal_timeline')
+            self._sync_timeline_events(deal_name, date_str)
+
+            # 4. Sync meeting insights
+            print('## Syncing meeting_insights')
+            self._sync_meeting_insights(deal_name, date_str)
+            
+            print(Fore.GREEN + f"Successfully synced deal {deal_name} for date {date_str}" + Style.RESET_ALL)
+            
+        except Exception as e:
+            print(Fore.RED + f"Error processing deal {deal_name}: {str(e)}" + Style.RESET_ALL)
+
+    def sync_deal_date_range(self, deal_name: str, start_date: str, end_date: str) -> None:
+        """Sync a specific deal for a date range"""
+        print(Fore.YELLOW + f"Syncing data for DEAL: {deal_name}, from {start_date} to {end_date}" + Style.RESET_ALL)
+        
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        current_date = start
+
+        while current_date <= end:
+            current_date_str = current_date.strftime("%Y-%m-%d")
+            self.sync_deal_on_date(deal_name, current_date_str)
+            current_date += timedelta(days=1)
+
+        print(Fore.GREEN + f"Successfully synced deal {deal_name} for date range {start_date} to {end_date}" + Style.RESET_ALL)
+
+    def sync_all_stages_on_date(self, date_str: str) -> None:
+        """Sync all deals across all stages for a single date"""
+        print(Fore.MAGENTA + f"Syncing data for ALL stages on date: {date_str}" + Style.RESET_ALL)
+        
         all_deals = self.hubspot_service.get_all_deals()
-
-        if stage != "all":
-            all_deals = [deal for deal in all_deals if deal.get("stage", "").lower() == stage.lower()]
-            print(Fore.MAGENTA + f"Filtered to {len(all_deals)} deals in stage: {stage}" + Style.RESET_ALL)
+        print(Fore.MAGENTA + f"Found {len(all_deals)} total deals to sync" + Style.RESET_ALL)
 
         for deal in all_deals:
             try:
@@ -64,19 +117,40 @@ class DataSyncService2:
                 if not deal_name:
                     continue
 
-                print(Fore.YELLOW + f"\nProcessing deal: {deal_name}" + Style.RESET_ALL)
-                
+                print(Fore.YELLOW + f"Processing deal: {deal_name}" + Style.RESET_ALL)
+                t = time.time()
                 self._sync_deal_info(deal_name)
-                
                 self._sync_deal_insights(deal_name, date_str)
-                
                 self._sync_timeline_events(deal_name, date_str)
-                
                 self._sync_meeting_insights(deal_name, date_str)
+                elapsed = time.time() - t
+                print(Fore.GREEN + f"Done syncing deal {deal_name} for date {date_str}.\nTook {elapsed:.2f} seconds" + Style.RESET_ALL)
 
             except Exception as e:
                 print(Fore.RED + f"Error processing deal {deal_name}: {str(e)}" + Style.RESET_ALL)
                 continue
+
+        print(Fore.GREEN + f"## Successfully synced all stages for date: {date_str}" + Style.RESET_ALL)
+
+    # Keeping the original sync method for backward compatibility
+    def sync(self, date_str: str, stage: str = "all", deal_name: Optional[str] = None) -> None:
+        """Legacy sync method that routes to the appropriate new sync method"""
+        if deal_name:
+            self.sync_deal_on_date(deal_name, date_str)
+        elif stage != "all":
+            self.sync_stage_on_date(stage, date_str)
+        else:
+            # Handle the "all" stage case
+            all_deals = self.hubspot_service.get_all_deals()
+            for deal in all_deals:
+                try:
+                    deal_name = deal.get("dealname")
+                    if not deal_name:
+                        continue
+                    self.sync_deal_on_date(deal_name, date_str)
+                except Exception as e:
+                    print(Fore.RED + f"Error processing deal {deal_name}: {str(e)}" + Style.RESET_ALL)
+                    continue
 
     def _sync_deal_info(self, deal_name: str) -> None:
         """Sync deal info if it doesn't exist in MongoDB"""

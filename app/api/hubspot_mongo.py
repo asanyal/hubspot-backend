@@ -941,4 +941,312 @@ async def sync_data_v2(
         print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
+
+@router.post("/sync/stage/date", status_code=202)
+async def sync_stage_on_date(
+    background_tasks: BackgroundTasks,
+    stage: str = Query(..., description="Stage name to sync deals from"),
+    date_str: str = Query(..., description="Date string in format YYYY-MM-DD to sync data for")
+):
+    """Sync all deals in a specific stage for a single date"""
+    try:
+        # Generate a unique job ID
+        job_id = f"sync_stage_date_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
+        
+        # Initialize job status
+        sync_jobs[job_id] = {
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "stage": stage,
+            "date_str": date_str,
+            "cancelled": False,
+            "type": "sync_stage_date"
+        }
+
+        # Start the sync job in a background thread
+        thread = threading.Thread(
+            target=run_sync_stage_on_date,
+            args=(job_id, stage, date_str)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        # Store thread reference for potential cancellation
+        active_threads[job_id] = thread
+
+        return {
+            "status": "accepted",
+            "message": "Sync job started",
+            "job_id": job_id
+        }
+
+    except Exception as e:
+        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
+
+@router.post("/sync/stage/date-range", status_code=202)
+async def sync_stage_date_range(
+    background_tasks: BackgroundTasks,
+    stage: str = Query(..., description="Stage name to sync deals from"),
+    start_date: str = Query(..., description="Start date in format YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date in format YYYY-MM-DD")
+):
+    """Sync all deals in a specific stage for a date range"""
+    try:
+        # Generate a unique job ID
+        job_id = f"sync_stage_range_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
+        
+        # Initialize job status
+        sync_jobs[job_id] = {
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "stage": stage,
+            "start_date": start_date,
+            "end_date": end_date,
+            "cancelled": False,
+            "type": "sync_stage_range"
+        }
+
+        # Start the sync job in a background thread
+        thread = threading.Thread(
+            target=run_sync_stage_date_range,
+            args=(job_id, stage, start_date, end_date)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        # Store thread reference for potential cancellation
+        active_threads[job_id] = thread
+
+        return {
+            "status": "accepted",
+            "message": "Sync job started",
+            "job_id": job_id
+        }
+
+    except Exception as e:
+        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
+
+@router.post("/sync/deal/date", status_code=202)
+async def sync_deal_on_date(
+    background_tasks: BackgroundTasks,
+    deal: str = Query(..., description="Deal name to sync"),
+    date_str: str = Query(..., description="Date string in format YYYY-MM-DD to sync data for")
+):
+    """Sync a specific deal for a single date"""
+    try:
+        # Generate a unique job ID
+        job_id = f"sync_deal_date_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
+        
+        # Initialize job status
+        sync_jobs[job_id] = {
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "deal": deal,
+            "date_str": date_str,
+            "cancelled": False,
+            "type": "sync_deal_date"
+        }
+
+        # Start the sync job in a background thread
+        thread = threading.Thread(
+            target=run_sync_deal_on_date,
+            args=(job_id, deal, date_str)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        # Store thread reference for potential cancellation
+        active_threads[job_id] = thread
+
+        return {
+            "status": "accepted",
+            "message": "Sync job started",
+            "job_id": job_id
+        }
+
+    except Exception as e:
+        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
+
+@router.post("/sync/deal/date-range", status_code=202)
+async def sync_deal_date_range(
+    background_tasks: BackgroundTasks,
+    deal: str = Query(..., description="Deal name to sync"),
+    start_date: str = Query(..., description="Start date in format YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date in format YYYY-MM-DD")
+):
+    """Sync a specific deal for a date range"""
+    try:
+        # Generate a unique job ID
+        job_id = f"sync_deal_range_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
+        
+        # Initialize job status
+        sync_jobs[job_id] = {
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "deal": deal,
+            "start_date": start_date,
+            "end_date": end_date,
+            "cancelled": False,
+            "type": "sync_deal_range"
+        }
+
+        # Start the sync job in a background thread
+        thread = threading.Thread(
+            target=run_sync_deal_date_range,
+            args=(job_id, deal, start_date, end_date)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        # Store thread reference for potential cancellation
+        active_threads[job_id] = thread
+
+        return {
+            "status": "accepted",
+            "message": "Sync job started",
+            "job_id": job_id
+        }
+
+    except Exception as e:
+        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
+
+# Background job runner functions
+def run_sync_stage_on_date(job_id: str, stage: str, date_str: str):
+    """Background function to run sync_stage_on_date"""
+    try:
+        sync_service_v2 = DataSyncService2()
+        sync_service_v2.sync_stage_on_date(stage, date_str)
+        
+        sync_jobs[job_id]["status"] = "completed"
+        sync_jobs[job_id]["message"] = f"Successfully synced stage {stage} for date: {date_str}"
+    except Exception as e:
+        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
+        sync_jobs[job_id]["status"] = "failed"
+        sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
+        sync_jobs[job_id]["error"] = str(e)
+    finally:
+        if job_id in active_threads:
+            del active_threads[job_id]
+
+def run_sync_stage_date_range(job_id: str, stage: str, start_date: str, end_date: str):
+    """Background function to run sync_stage_date_range"""
+    try:
+        sync_service_v2 = DataSyncService2()
+        sync_service_v2.sync_stage_date_range(stage, start_date, end_date)
+        
+        sync_jobs[job_id]["status"] = "completed"
+        sync_jobs[job_id]["message"] = f"Successfully synced stage {stage} from {start_date} to {end_date}"
+    except Exception as e:
+        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
+        sync_jobs[job_id]["status"] = "failed"
+        sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
+        sync_jobs[job_id]["error"] = str(e)
+    finally:
+        if job_id in active_threads:
+            del active_threads[job_id]
+
+def run_sync_deal_on_date(job_id: str, deal: str, date_str: str):
+    """Background function to run sync_deal_on_date"""
+    try:
+        sync_service_v2 = DataSyncService2()
+        sync_service_v2.sync_deal_on_date(deal, date_str)
+        
+        sync_jobs[job_id]["status"] = "completed"
+        sync_jobs[job_id]["message"] = f"Successfully synced deal {deal} for date: {date_str}"
+    except Exception as e:
+        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
+        sync_jobs[job_id]["status"] = "failed"
+        sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
+        sync_jobs[job_id]["error"] = str(e)
+    finally:
+        if job_id in active_threads:
+            del active_threads[job_id]
+
+def run_sync_deal_date_range(job_id: str, deal: str, start_date: str, end_date: str):
+    """Background function to run sync_deal_date_range"""
+    try:
+        sync_service_v2 = DataSyncService2()
+        sync_service_v2.sync_deal_date_range(deal, start_date, end_date)
+        
+        sync_jobs[job_id]["status"] = "completed"
+        sync_jobs[job_id]["message"] = f"Successfully synced deal {deal} from {start_date} to {end_date}"
+    except Exception as e:
+        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
+        sync_jobs[job_id]["status"] = "failed"
+        sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
+        sync_jobs[job_id]["error"] = str(e)
+    finally:
+        if job_id in active_threads:
+            del active_threads[job_id]
+
+@router.post("/sync/all-stages/date", status_code=202)
+async def sync_all_stages_on_date(
+    background_tasks: BackgroundTasks,
+    date_str: str = Query(..., description="Date string in format YYYY-MM-DD to sync data for")
+):
+    """Sync all deals across all stages for a single date"""
+    try:
+        # Generate a unique job ID
+        job_id = f"sync_all_stages_date_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
+        
+        # Initialize job status
+        sync_jobs[job_id] = {
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "date_str": date_str,
+            "cancelled": False,
+            "type": "sync_all_stages_date"
+        }
+
+        # Start the sync job in a background thread
+        thread = threading.Thread(
+            target=run_sync_all_stages_on_date,
+            args=(job_id, date_str)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        # Store thread reference for potential cancellation
+        active_threads[job_id] = thread
+
+        return {
+            "status": "accepted",
+            "message": "Sync job started",
+            "job_id": job_id
+        }
+
+    except Exception as e:
+        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
+
+def run_sync_all_stages_on_date(job_id: str, date_str: str):
+    """Background function to run sync_all_stages_on_date"""
+    try:
+        sync_service_v2 = DataSyncService2()
+        sync_service_v2.sync_all_stages_on_date(date_str)
+        
+        sync_jobs[job_id]["status"] = "completed"
+        sync_jobs[job_id]["message"] = f"Successfully synced all stages for date: {date_str}"
+    except Exception as e:
+        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
+        sync_jobs[job_id]["status"] = "failed"
+        sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
+        sync_jobs[job_id]["error"] = str(e)
+    finally:
+        if job_id in active_threads:
+            del active_threads[job_id] 
