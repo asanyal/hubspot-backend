@@ -170,60 +170,30 @@ class GongService:
                 "already_has_vendor": {"has_vendor": False, "explanation": "Could not identify company"}
             }
 
-        def parse_llm_response(response: str, default_key: str) -> Dict:
-            """Helper function to parse LLM response and handle errors"""
-            try:
-                # Clean the response
-                response = response.replace('```json', '').replace('```', '').replace('\n', '').strip()
-                
-                # Try to parse as JSON
-                try:
-                    return json.loads(response)
-                except json.JSONDecodeError:
-                    # If the response isn't valid JSON, try to extract JSON from text
-                    import re
-                    json_match = re.search(r'(\{.*\})', response, re.DOTALL)
-                    if json_match:
-                        try:
-                            return json.loads(json_match.group(1))
-                        except:
-                            return {default_key: False, "explanation": "Could not parse response"}
-                    else:
-                        return {default_key: False, "explanation": "Could not parse response"}
-            except Exception as e:
-                return {default_key: False, "explanation": f"Error: {str(e)}"}
-        
         try:
-            # Convert string date to datetime if needed
             if isinstance(call_date, str):
                 target_date = datetime.strptime(call_date, "%Y-%m-%d")
             else:
                 target_date = call_date
-
-            # Calculate date range
+            
             start_date = target_date
             end_date = target_date + timedelta(days=self.reschedule_window)
 
-            # Track all results
             all_results = []
             current_date = start_date
             
             while current_date <= end_date:
                 date_str = current_date.strftime("%Y-%m-%d")
                 
-                # Get calls for this date
                 calls = self.list_calls(date_str)
-                call_id = self.get_call_id(calls, company_name, call_title=call_title)  # Use company_name instead of call_title
+                call_id = self.get_call_id(calls, company_name, call_title=call_title)
                 
                 if call_id:
-                    
-                    # Get transcripts
                     start_time = f"{date_str}T00:00:00Z"
                     end_time = f"{date_str}T23:59:59Z"
                     transcripts_data = self.get_call_transcripts([call_id], start_time, end_time)
 
                     if transcripts_data and "callTranscripts" in transcripts_data:
-                        # Combine all non-Galileo transcripts
                         combined_transcript = ""
                         for transcript in transcripts_data["callTranscripts"]:
                             for part in transcript.get("transcript", []):
@@ -237,44 +207,42 @@ class GongService:
                                         combined_transcript += sentence.get("text", "") + " "
 
                         if combined_transcript.strip():
-                            # Analyze with each prompt
                             pricing_response = ask_openai(
-                                user_content=pricing_concerns_prompt.format(transcript=combined_transcript),
-                                system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
+                                user_content=pricing_concerns_prompt.format(transcript=combined_transcript)
                             )
-                            pricing_analysis = parse_llm_response(pricing_response, "pricing_concerns")
+
+                            pr_json = json.loads(pricing_response)
 
                             decision_maker_response = ask_openai(
-                                user_content=no_decision_maker_prompt.format(transcript=combined_transcript),
-                                system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
+                                user_content=no_decision_maker_prompt.format(transcript=combined_transcript)
                             )
-                            decision_maker_analysis = parse_llm_response(decision_maker_response, "no_decision_maker")
+
+                            dm_json = json.loads(decision_maker_response)
 
                             vendor_response = ask_openai(
-                                user_content=already_has_vendor_prompt.format(transcript=combined_transcript),
-                                system_content="You are a smart Sales Operations Analyst that analyzes Sales calls."
+                                user_content=already_has_vendor_prompt.format(transcript=combined_transcript)
                             )
-                            vendor_analysis = parse_llm_response(vendor_response, "already_has_vendor")
 
-                            # Add results for this call
+                            vr_json = json.loads(vendor_response)
+
                             all_results.append({
                                 "date": date_str,
                                 "result": {
                                     "pricing_concerns": {
-                                        "has_concerns": pricing_analysis.get("pricing_concerns", False),
-                                        "explanation": pricing_analysis.get("explanation", "No explanation provided")
+                                        "has_concerns": pr_json.get("pricing_concerns", False),
+                                        "explanation": pr_json.get("explanation", "-- Not computed --")
                                     },
                                     "no_decision_maker": {
-                                        "is_issue": decision_maker_analysis.get("no_decision_maker", False),
-                                        "explanation": decision_maker_analysis.get("explanation", "No explanation provided")
+                                        "is_issue": dm_json.get("no_decision_maker", False),
+                                        "explanation": dm_json.get("explanation", "-- Not computed --")
                                     },
                                     "already_has_vendor": {
-                                        "has_vendor": vendor_analysis.get("already_has_vendor", False),
-                                        "explanation": vendor_analysis.get("explanation", "No explanation provided")
+                                        "has_vendor": vr_json.get("already_has_vendor", False),
+                                        "explanation": vr_json.get("explanation", "-- Not computed --")
                                     }
                                 }
                             })
-                
+            
                 current_date += timedelta(days=1)
 
             if not all_results:
@@ -297,7 +265,7 @@ class GongService:
                 "already_has_vendor": {"has_vendor": False, "explanation": f"Error: {str(e)}"}
             }
 
-    def get_buyer_intent_json(self, call_transcript, seller_name, call_date_str) -> Dict:
+    def get_buyer_intent_json(self, call_transcript, seller_name) -> Dict:
         try:
             response = ask_openai(
                 user_content=buyer_intent_prompt.format(call_transcript=call_transcript, seller_name=seller_name),
@@ -313,8 +281,7 @@ class GongService:
             try:
                 intent_json = json.loads(response)
             except json.JSONDecodeError:
-                # If the response isn't valid JSON, try to extract JSON from text
-                # Sometimes the LLM might include explanation text outside the JSON
+                print("Coupd not parse the buyer intent json into a JSON object")
                 import re
                 json_match = re.search(r'(\{.*\})', response, re.DOTALL)
                 if json_match:
@@ -336,7 +303,7 @@ class GongService:
                 intent_json["intent"] = "Unable to determine"
             if "explanation" not in intent_json:
                 intent_json["explanation"] = "No explanation provided"
-                
+            print("Returning intent_json successfully!")
             return intent_json
         except Exception as e:
             return {
@@ -407,7 +374,9 @@ class GongService:
                     }
 
                 # Get buyer intent analysis for the transcript
-                return self.get_buyer_intent_json(full_transcript, seller_name, call_date)
+                buyer_intent = self.get_buyer_intent_json(full_transcript, seller_name)
+                print("In the function get_buyer_intent, output of get_buyer_intent_json: ", buyer_intent)
+                return buyer_intent
             
             return default_response
         except Exception as e:
@@ -434,7 +403,7 @@ class GongService:
                 "fromDateTime": from_datetime,
                 "toDateTime": to_datetime
             }
-            
+
             response = requests.get(
                 url, 
                 auth=(self.access_key, self.client_secret), 
@@ -558,7 +527,7 @@ class GongService:
                             if "sentences" in part:
                                 for sentence in part["sentences"]:
                                     speaker_data[speaker_id].full_transcript += sentence.get("text", "") + " "
-            
+
             current_date += timedelta(days=1)
         
         return speaker_data
@@ -566,17 +535,13 @@ class GongService:
     def get_champions(self, call_title, target_date=None) -> List[Dict]:
         try:
             company_name = extract_company_name(call_title)
-            if company_name == "Unknown Company":
-                return []
 
             if target_date is None:
                 target_date = datetime.now()
             
-            # Calculate date range
             start_date = target_date
             end_date = target_date + timedelta(days=self.reschedule_window)
 
-            
             # Get speaker data using the new method
             speaker_data = self.get_speaker_data(company_name, start_date, end_date)
 
@@ -620,132 +585,113 @@ class GongService:
             traceback.print_exc()
             return []
 
-    def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], lookback_window: int = 1) -> List[Dict]:
-        print('Timeline event: ', timeline_events[0])
+    def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], date_str: str) -> List[Dict]:
         try:
-            # Get existing meeting subjects to avoid duplicates
+            print(f"Getting additional meetings for company {company_name} on date {date_str}.")
             existing_subjects = {event.get("subject", "").lower() for event in timeline_events}
             
-            # Calculate date range
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=lookback_window)
-            
-            # Ensure we're not looking at future dates
-            if end_date > datetime.now():
-                end_date = datetime.now()
-            if start_date > datetime.now():
-                start_date = datetime.now() - timedelta(days=lookback_window)
-            
-            # Track subjects we've already added to prevent duplicates within new meetings
             added_subjects = set()
             additional_meetings = []
-            current_date = start_date
             
-            while current_date <= end_date:
-                date_str = current_date.strftime("%Y-%m-%d")
+            # Get calls for this date
+            calls = self.list_calls(date_str)
+            
+            for call in calls:
+                call_title = call.get("title", "").lower()
+                print(f"Call title from Gong: {call_title} on date {date_str}")
                 
-                # Get calls for this date
-                calls = self.list_calls(date_str)
+                # Skip if call title is empty
+                if not call_title:
+                    continue
+                    
+                # Use the same matching logic as get_call_id
+                company_name_synonyms = company_name.lower().split(",")
                 
-                for call in calls:
-                    call_title = call.get("title", "").lower()
-                    print("Call title from Gong: ", call_title)
-                    
-                    # Skip if call title is empty
-                    if not call_title:
-                        continue
-                        
-                    # Use the same matching logic as get_call_id
-                    company_name_synonyms = company_name.lower().split(",")
-                    
-                    # Check if any company name token is a substring of any title token
-                    is_match = False
-                    for company_synonym in company_name_synonyms:
-                        if company_synonym.strip() in call_title.strip():
-                            is_match = True
-                            break
+                # Check if any company name token is a substring of any title token
+                is_match = False
+                for company_synonym in company_name_synonyms:
+                    if company_synonym.strip() in call_title.strip():
+                        is_match = True
+                        break
 
-                    if not is_match:
-                        continue
-                        
-                    # Skip if this meeting already exists in timeline events or has been added
-                    if call_title.strip().lower() in {s.strip().lower() for s in existing_subjects} or call_title.strip().lower() in {s.strip().lower() for s in added_subjects}:
-                        print("Skipping duplicate call title: ", call_title)
-                        continue
+                if not is_match:
+                    continue
                     
-                    # Get call ID and transcript
-                    call_id = call.get("id")
-                    if not call_id:
-                        continue
-                        
-                    start_time = f"{date_str}T00:00:00Z"
-                    end_time = f"{date_str}T23:59:59Z"
-                    
-                    # Get transcript
-                    transcript_data = self.get_call_transcripts([call_id], start_time, end_time)
-                    if not transcript_data or "callTranscripts" not in transcript_data:
-                        continue
-                        
-                    # Combine all non-Galileo transcripts
-                    transcript = ""
-                    for call_transcript in transcript_data["callTranscripts"]:
-                        for part in call_transcript.get("transcript", []):
-                            speaker_id = part.get("speakerId", "unknown")
-                            # Skip Galileo speakers
-                            if "galileo.ai" in speaker_id.lower():
-                                continue
-                            
-                            if "sentences" in part:
-                                for sentence in part["sentences"]:
-                                    transcript += sentence.get("text", "") + " "
-                    
-                    if not transcript.strip():
-                        continue
-                    
-                    # Get buyer intent
-                    buyer_intent = self.get_buyer_intent(
-                        call_title=call.get("title", ""),
-                        call_date=date_str,
-                        seller_name="Galileo"
-                    )
-                    
-                    # Get sentiment
-                    sentiment = "neutral"
-                    if transcript:
-                        # Truncate content to a reasonable length before analysis
-                        max_content_length = 10000  # Roughly 2500 tokens
-                        if len(transcript) > max_content_length:
-                            transcript = transcript[:max_content_length] + "..."
-                            
-                        sentiment = ask_openai(
-                            system_content="You are a smart Sales Operations Analyst that analyzes Sales emails.",
-                            user_content=f"""
-                            Classify the sentiment in this email as positive (likely to buy Galileo), negative (unlikely to buy Galileo), or neutral (no clear indication to buy Galileo):
-                            {transcript}
-                            Return only one word: positive, negative, neutral
-                            """
-                        )
-                    
-                    # Create event object
-                    event = {
-                        "id": f"gong_{uuid.uuid4()}",
-                        "engagement_id": None,
-                        "date_str": date_str,
-                        "time_str": call.get("startTime", "").split("T")[1][:5] if "startTime" in call else "00:00",
-                        "type": "Meeting",
-                        "subject": call.get("title", ""),
-                        "content": "",
-                        "content_preview": "",
-                        "sentiment": sentiment,
-                        "buyer_intent": buyer_intent.get("intent", "Not available"),
-                        "buyer_intent_explanation": buyer_intent.get("explanation", "Not available")
-                    }
-                    
-                    # Add to our tracking set and list
-                    added_subjects.add(call_title)
-                    additional_meetings.append(event)
+                # Skip if this meeting already exists in timeline events or has been added
+                if call_title.strip().lower() in {s.strip().lower() for s in existing_subjects} or call_title.strip().lower() in {s.strip().lower() for s in added_subjects}:
+                    print("Skipping duplicate call title: ", call_title)
+                    continue
                 
-                current_date += timedelta(days=1)
+                # Get call ID and transcript
+                call_id = call.get("id")
+                if not call_id:
+                    continue
+                    
+                start_time = f"{date_str}T00:00:00Z"
+                end_time = f"{date_str}T23:59:59Z"
+                
+                # Get transcript
+                transcript_data = self.get_call_transcripts([call_id], start_time, end_time)
+                if not transcript_data or "callTranscripts" not in transcript_data:
+                    continue
+                    
+                # Combine all non-Galileo transcripts
+                transcript = ""
+                for call_transcript in transcript_data["callTranscripts"]:
+                    for part in call_transcript.get("transcript", []):
+                        speaker_id = part.get("speakerId", "unknown")
+                        # Skip Galileo speakers
+                        if "galileo.ai" in speaker_id.lower():
+                            continue
+                        
+                        if "sentences" in part:
+                            for sentence in part["sentences"]:
+                                transcript += sentence.get("text", "") + " "
+                
+                if not transcript.strip():
+                    continue
+                
+                # Get buyer intent
+                buyer_intent = self.get_buyer_intent(
+                    call_title=call.get("title", ""),
+                    call_date=date_str,
+                    seller_name="Galileo"
+                )
+                
+                # Get sentiment
+                sentiment = "-- Not computed --"
+                if transcript:
+                    # Truncate content to a reasonable length before analysis
+                    max_content_length = 10000  # Roughly 2500 tokens
+                    if len(transcript) > max_content_length:
+                        transcript = transcript[:max_content_length] + "..."
+                        
+                    sentiment = ask_openai(
+                        system_content="You are a smart Sales Operations Analyst that analyzes Sales emails.",
+                        user_content=f"""
+                        Classify the sentiment in this email as positive (likely to buy Galileo), negative (unlikely to buy Galileo), or neutral (no clear indication to buy Galileo):
+                        {transcript}
+                        Return only one word: positive, negative, neutral
+                        """
+                    )
+                
+                event = {
+                    "id": f"gong_{uuid.uuid4()}",
+                    "engagement_id": None,
+                    "date_str": date_str,
+                    "time_str": call.get("startTime", "").split("T")[1][:5] if "startTime" in call else "00:00",
+                    "type": "Meeting",
+                    "subject": call.get("title", ""),
+                    "content": "",
+                    "content_preview": "",
+                    "sentiment": sentiment,
+                    "buyer_intent": buyer_intent.get("intent"),
+                    "buyer_intent_explanation": buyer_intent.get("summary")
+                }
+                
+                # Add to our tracking set and list
+                added_subjects.add(call_title)
+                additional_meetings.append(event)
             
             return additional_meetings
             
@@ -754,99 +700,80 @@ class GongService:
             traceback.print_exc()
             return []
 
-    def get_meeting_insights(self, meeting_id: str) -> Dict:
-        """
-        Get meeting insights from Gong API for a specific meeting.
-        This method always makes a fresh API call to ensure we get the latest data.
+    def get_meeting_insights(self, call_id: str) -> Dict:
+        headers = {'Content-Type': 'application/json'}
+        transcript_url = 'https://us-5738.api.gong.io/v2/calls/transcript'
+        transcript_payload = {
+            "filter": {
+                "callIds": [str(call_id)]
+            }
+        }
+
+        transcript_response = requests.post(
+            transcript_url, 
+            auth=(self.access_key, self.client_secret), 
+            headers=headers, 
+            json=transcript_payload
+        )
+            
+        transcript_data = transcript_response.json()
+
+        call_url = f'https://us-5738.api.gong.io/v2/calls/{call_id}'
+        call_response = requests.get(
+            call_url,
+            auth=(self.access_key, self.client_secret)
+        )
         
-        Args:
-            meeting_id: The Gong meeting ID
-            
-        Returns:
-            Dict containing meeting insights including buyer intent and champion analysis
-        """
-        try:
-            
-            # Get meeting data from Gong API
-            url = f"https://us-5738.api.gong.io/v2/calls/extensive"
-            headers = {'Content-Type': 'application/json'}
-            payload = {
-                "filter": {
-                    "callIds": [str(meeting_id)]
-                },
-                "contentSelector": {
-                    "exposedFields": {
-                        "parties": True,
-                        "interaction": {
-                            "transcript": True,
-                            "topics": True
-                        }
-                    }
+        call = call_response.json().get("call", {})
+
+        buyer_transcripts = ""
+
+        if "callTranscripts" in transcript_data:
+            for transcript in transcript_data["callTranscripts"]:
+                for part in transcript.get("transcript", []):
+                    speaker_id = part.get("speakerId", "unknown")
+                    
+                    # Extract and concatenate all sentences from this speaker
+                    if "sentences" in part:
+                        for sentence in part["sentences"]:
+                            buyer_transcripts += sentence.get("text", "") + " "
+
+        buyer_intent = self.get_buyer_intent_json(
+            buyer_transcripts,
+            "Galileo",
+        )
+
+        # TODO: Figure out a new way to get champions
+        champions = [
+            {
+                "email": "Not computed",
+                "speakerName": "Not computed",
+                "champion": False,
+                "explanation": "Not computed",
+                "parr_analysis": {
+                    "power": False,
+                    "authority": False,
+                    "resources": False,
+                    "relevance": False,
+                    "explanation": "Not computed"
                 }
             }
+        ]        
+
+        # Compile insights
+        insights = {
+            "meeting_id": call_id,
+            "meeting_title": call.get("title", ""),
+            "meeting_date": call.get("scheduled", "").split("T")[0],
+            "buyer_intent": buyer_intent,
+            "champion_analysis": champions,
+            "topics": "",
+            "transcript": buyer_transcripts,
+            "last_updated": datetime.now(timezone.utc).isoformat()
+        }
+
+        return insights
             
-            response = requests.post(
-                url,
-                auth=(self.access_key, self.client_secret),
-                headers=headers,
-                json=payload
-            )
-            
-            if not response.ok:
-                return None
-                
-            meeting_data = response.json()
-            calls = meeting_data.get("calls", [])
-            
-            if not calls:
-                return None
-                
-            call = calls[0]  # Get the first (and should be only) call
-            
-            # Extract company name from call title
-            company_name = extract_company_name(call.get("title", ""))
-            
-            # Extract transcript and topics
-            transcript = ""
-            topics = []
-            for part in call.get("interaction", {}).get("transcript", []):
-                if "sentences" in part:
-                    for sentence in part["sentences"]:
-                        transcript += sentence.get("text", "") + " "
-                if "topic" in part:
-                    topics.append(part["topic"])
-            
-            # Get buyer intent analysis
-            buyer_intent = self.get_buyer_intent_json(
-                transcript,
-                "Atin Sanyal",  # TODO: Get actual seller name
-                call.get("startTime", "").split("T")[0]  # Extract date from startTime
-            )
-            
-            # Get champion analysis
-            champions = self.get_champions(
-                call.get("title", ""),
-                datetime.strptime(call.get("startTime", "").split("T")[0], "%Y-%m-%d")
-            )
-            
-            # Compile insights
-            insights = {
-                "meeting_id": meeting_id,
-                "meeting_title": call.get("title", ""),
-                "meeting_date": call.get("startTime", "").split("T")[0],
-                "buyer_intent": buyer_intent,
-                "champion_analysis": champions,
-                "topics": topics,
-                "transcript": transcript,
-                "last_updated": datetime.now(timezone.utc).isoformat()
-            }
-            
-            return insights
-            
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return None
 
 if __name__ == "__main__":
 

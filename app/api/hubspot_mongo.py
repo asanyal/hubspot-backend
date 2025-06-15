@@ -9,6 +9,7 @@ from app.repositories.deal_timeline_repository import DealTimelineRepository
 from app.repositories.meeting_insights_repository import MeetingInsightsRepository
 from app.repositories.company_overview_repository import CompanyOverviewRepository
 from app.services.data_sync_service import DataSyncService
+from app.services.dss2 import DataSyncService2
 from colorama import Fore, Style, init
 import threading
 import queue
@@ -23,6 +24,7 @@ deal_timeline_repo = DealTimelineRepository()
 meeting_insights_repo = MeetingInsightsRepository()
 company_overview_repo = CompanyOverviewRepository()
 sync_service = DataSyncService()
+sync_service_v2 = DataSyncService2()
 
 # Store for tracking sync jobs
 sync_jobs = {}
@@ -204,22 +206,6 @@ async def get_deal_timeline(
                 }
             }
             
-        # Get meeting info for champion data
-        meeting_info = meeting_insights_repo.get_by_deal_id(dealName)
-        
-        # Process champions data
-        all_champions = []
-        meeting_count = 0
-        if meeting_info:
-            for meeting in meeting_info:
-                if meeting.get('champion_analysis'):
-                    all_champions.extend(meeting['champion_analysis'])
-                meeting_count += 1
-        
-        # Remove duplicates based on email
-        unique_champions = {champ["email"]: champ for champ in all_champions}.values()
-        champions_count = sum(1 for champ in unique_champions if champ.get("champion", False))
-        total_contacts = len(unique_champions)
         
         # Format events to match old format
         formatted_events = []
@@ -254,19 +240,6 @@ async def get_deal_timeline(
             "start_date": timeline_data.get('start_date'),
             "end_date": timeline_data.get('end_date'),
             "deal_id": dealName,
-            "champions_summary": {
-                "total_contacts": total_contacts,
-                "champions_count": champions_count,
-                "meeting_count": meeting_count,
-                "champions": [
-                    {
-                        "champion": champ.get("champion", False),
-                        "explanation": champ.get("explanation", ""),
-                        "email": champ.get("email", "")
-                    }
-                    for champ in unique_champions
-                ]
-            }
         }
         
         return response
@@ -374,38 +347,27 @@ async def get_concerns(
         if not deal_activity:
             print(Fore.YELLOW + f"No deal insights found for: {dealName}" + Style.RESET_ALL)
             return {
-                "pricing_concerns": "No pricing concerns data available",
-                "no_decision_maker": "No decision maker data available",
-                "already_has_vendor": "No vendor data available"
+                "pricing_concerns": "No data",
+                "no_decision_maker": "No data",
+                "already_has_vendor": "No data"
             }
             
-        # Get the most recent concerns from the concerns array
-        concerns = deal_activity.get('concerns', [])
+        # Get the concerns object directly
+        concerns = deal_activity.get('concerns', {})
         if not concerns:
             print(Fore.YELLOW + f"No concerns data found for: {dealName}" + Style.RESET_ALL)
             return {
-                "pricing_concerns": "No concerns data available",
-                "no_decision_maker": "No concerns data available",
-                "already_has_vendor": "No concerns data available"
+                "pricing_concerns": "No data",
+                "no_decision_maker": "No data",
+                "already_has_vendor": "No data"
             }
-        else:
-            print(Fore.GREEN + f"Found concerns data: {concerns}" + Style.RESET_ALL)
-
-        # Get the most recent concerns (last in the array)
-        latest_concerns = concerns[-1]
-        print(Fore.GREEN + f"Found concerns data: {latest_concerns}" + Style.RESET_ALL)
+            
+        print(Fore.GREEN + f"Found concerns data: {concerns}" + Style.RESET_ALL)
         
-        # Convert any empty dictionaries to strings
-        pricing_concerns = latest_concerns.get('pricing_concerns', "No pricing concerns data")
-        no_decision_maker = latest_concerns.get('no_decision_maker', "No decision maker data")
-        already_has_vendor = latest_concerns.get('already_has_vendor', "No vendor data")
-        
-        if pricing_concerns == {}:
-            pricing_concerns = "No pricing concerns data"
-        if no_decision_maker == {}:
-            no_decision_maker = "No decision maker data"
-        if already_has_vendor == {}:
-            already_has_vendor = "No vendor data"
+        # Extract each concern type with their full data
+        pricing_concerns = concerns.get('pricing_concerns', {})
+        no_decision_maker = concerns.get('no_decision_maker', {})
+        already_has_vendor = concerns.get('already_has_vendor', {})
         
         response = {
             "pricing_concerns": pricing_concerns,
@@ -906,4 +868,77 @@ async def delete_deal(dealName: str = Query(..., description="The name of the de
         }
     except Exception as e:
         print(Fore.RED + f"Error deleting deal data: {str(e)}" + Style.RESET_ALL)
-        raise HTTPException(status_code=500, detail=f"Error deleting deal data: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error deleting deal data: {str(e)}")
+
+def run_sync_job_v2(job_id: str, date_str: str, stage: str = "all", deal: Optional[str] = None):
+    """Background function to run sync operations using DataSyncService2"""
+    try:
+        if deal:
+            print(Fore.YELLOW + f"Starting sync job {job_id}: Syncing specific deal {deal} for date {date_str}" + Style.RESET_ALL)
+        else:
+            print(Fore.YELLOW + f"Starting sync job {job_id}: Syncing data for date {date_str}, stage: {stage}" + Style.RESET_ALL)
+        
+        sync_service_v2 = DataSyncService2()
+        sync_service_v2.sync(date_str, stage, deal)
+        
+        if deal:
+            sync_jobs[job_id]["status"] = "completed"
+            sync_jobs[job_id]["message"] = f"Successfully synced deal {deal} for date: {date_str}"
+        else:
+            sync_jobs[job_id]["status"] = "completed"
+            sync_jobs[job_id]["message"] = f"Successfully synced data for date: {date_str}, stage: {stage}"
+    except Exception as e:
+        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
+        sync_jobs[job_id]["status"] = "failed"
+        sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
+        sync_jobs[job_id]["error"] = str(e)
+    finally:
+        # Clean up thread reference
+        if job_id in active_threads:
+            del active_threads[job_id]
+
+@router.post("/sync/v2", status_code=202)
+async def sync_data_v2(
+    background_tasks: BackgroundTasks,
+    date_str: str = Query(..., description="Date string in format YYYY-MM-DD to sync data for"),
+    stage: str = Query("all", description="Optional stage name to filter deals. Defaults to 'all' to sync all deals."),
+    deal: Optional[str] = Query(None, description="Optional specific deal name to sync. If provided, only this deal will be synced.")
+):
+
+    try:
+        # Generate a unique job ID
+        job_id = f"sync_v2_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
+        
+        # Initialize job status
+        sync_jobs[job_id] = {
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "date_str": date_str,
+            "stage": stage,
+            "deal": deal,
+            "cancelled": False,
+            "type": "sync_v2"
+        }
+
+        # Start the sync job in a background thread
+        thread = threading.Thread(
+            target=run_sync_job_v2,
+            args=(job_id, date_str, stage, deal)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        # Store thread reference for potential cancellation
+        active_threads[job_id] = thread
+
+        return {
+            "status": "accepted",
+            "message": "Sync job started",
+            "job_id": job_id
+        }
+
+    except Exception as e:
+        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}") 

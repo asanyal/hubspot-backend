@@ -13,7 +13,7 @@ def estimate_token_count(text: str) -> int:
     # Rough approximation: 1 token ≈ 4 characters for English text
     return len(text) // 4
 
-def ask_openai(system_content: str, user_content: str) -> str:
+def ask_openai(user_content: str, system_content: str = "You are a smart Sales Analyst.") -> str:
     """
     Ask OpenAI a question with system and user content.
     Handles token limit errors by truncating content if necessary.

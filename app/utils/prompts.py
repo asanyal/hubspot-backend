@@ -233,31 +233,16 @@ pricing_concerns_prompt = """
 """
 
 no_decision_maker_prompt = """
-You are an expert conversation analyst.
+    Analyze the transcripts below and see if there are any decision makers in the conversation.
+    Decision makers are people who have the authority to make decisions about purchasing Galileo.
+    Return a JSON with the following fields:
+    - no_decision_maker: true or false (use lowercase, JSON boolean values)
+    - explanation: A one-line explanation on why this person is a decision maker (or not)
 
-Given the transcript of a sales call, determine whether any **buyer-side** speaker appears to be a decision maker — someone with **clear authority or strong influence** over the buying decision.
+    Transcript:
+    {transcript}
 
-Use only the words and behavior in the transcript. Look for:
-- If someone explicitly mentions their title or role in the company as a decision maker (leadership, Director, VP, CXO, etc.)
-- Questions or comments indicating control over priorities, timelines, or budget
-- Statements showing ownership ("I'll approve", "I decide", "We'll buy", "My team will use this")
-- Signs of influence ("Let me talk to the VP", "I'll get this in front of leadership", "We've budgeted for this")
-- Confidence, clarity, or leadership in tone
-
-If no such signals are found, assume no decision maker was present.
-
-Return JSON in this format:
-{
-  "no_decision_maker": true or false,
-  "explanation": "One-line explanation based on transcript"
-}
-
-Only analyze the **buyer** speakers. Do not consider Galileo's team.
-
-Transcript:
-{transcript}
-
-STRICTLY return only the JSON.
+    STRICTLY return the JSON, nothing else.
 """
 
 already_has_vendor_prompt = """
@@ -278,7 +263,7 @@ already_has_vendor_prompt = """
     - HoneyHive
     - PromptFoo
     - LangWatch
-    - Any other LLM Evaluation or Observability tools
+    - Building an internal tool to solve the same problem
 
     Return a JSON with the following fields:
     - already_has_vendor: true or false (use lowercase, JSON boolean values)

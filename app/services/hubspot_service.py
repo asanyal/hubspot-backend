@@ -1,7 +1,8 @@
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import sys
 import os
+import json
 
 # Add the project root directory to Python path when running directly
 if __name__ == "__main__":
@@ -472,9 +473,13 @@ class HubspotService:
         
         return validated_deals
 
-    def get_deal_timeline(self, deal_name: str) -> Dict[str, Any]:
-        """Get the full timeline data for a specific deal. Returns email content if include_content is True"""
-        from datetime import datetime
+    def get_deal_timeline(self, deal_name: str, date_range: Optional[tuple[datetime, datetime]] = None) -> Dict[str, Any]:
+        """Get the full timeline data for a specific deal. Returns email content if include_content is True
+        
+        Args:
+            deal_name: Name of the deal to get timeline for
+            date_range: Optional tuple of (start_date, end_date) to filter engagements. If None, returns all engagements.
+        """
 
         try:
             # Find the deal ID
@@ -496,75 +501,107 @@ class HubspotService:
             if not engagement_ids:
                 return {"events": [], "start_date": None, "end_date": None}
 
+            # First pass: Filter engagements by date range if provided
+            filtered_engagement_ids = []
+            if date_range:
+                start_date, end_date = date_range
+                print(f"Filtering engagements between {start_date} and {end_date}")
+                
+                for eng_id in engagement_ids:
+                    try:
+                        engagements_url = f"https://api.hubapi.com/crm/v3/objects/engagements/{eng_id}"
+                        eng_params = {
+                            "properties": "hs_timestamp"
+                        }
+                        
+                        engagements_response = self._session.get(engagements_url, params=eng_params)
+                        if engagements_response.status_code != 200:
+                            continue
+                            
+                        engagement = engagements_response.json()
+                        engagement_properties = engagement.get("properties", {})
+                        engagement_timestamp = engagement_properties.get("hs_timestamp")
+                        
+                        if engagement_timestamp:
+                            try:
+                                engagement_date = datetime.fromtimestamp(int(engagement_timestamp) / 1000)
+                                if start_date <= engagement_date <= end_date:
+                                    filtered_engagement_ids.append(eng_id)
+                            except (ValueError, TypeError):
+                                continue
+                    except Exception as e:
+                        continue
+                
+                print(f"Found {len(filtered_engagement_ids)} engagements within date range")
+                engagement_ids = filtered_engagement_ids
+
             timeline_events = []
             start_engagement_date = None
             latest_engagement_date = None
-            seen_subjects = set()  # Track seen subjects for deduplication
+            seen_subjects = set()
             prefixes = ["[Gong] Google Meet:", "[Gong] Zoom:", "[Gong] WebEx:", "[Gong]"]
 
-            # Process each engagement sequentially
+            from colorama import Fore, Style
+            print(Fore.YELLOW + f"Processing {len(engagement_ids)} engagements for deal {deal_name}." + Style.RESET_ALL)
+
             for eng_id in engagement_ids:
                 try:
-                    detail_url = f"https://api.hubapi.com/crm/v3/objects/engagements/{eng_id}"
-                    detail_params = {
+                    engagements_url = f"https://api.hubapi.com/crm/v3/objects/engagements/{eng_id}"
+                    eng_params = {
                         "properties": "hs_engagement_type,hs_timestamp,hs_email_subject,hs_email_text,hs_note_body,hs_call_body,hs_meeting_title,hs_meeting_body,hs_task_body"
                     }
 
-                    detail_response = self._session.get(detail_url, params=detail_params)
-                    if detail_response.status_code != 200:
+                    engagements_response = self._session.get(engagements_url, params=eng_params)
+                    if engagements_response.status_code != 200:
                         continue
-                        
-                    details = detail_response.json()
-                    props = details.get("properties", {})
+                    
+                    engagement = engagements_response.json()
+
+                    engagement_properties = engagement.get("properties", {})
                     
                     # Get engagement type
-                    activity_type = props.get("hs_engagement_type", "Unknown")
+                    activity_type = engagement_properties.get("hs_engagement_type", "Unknown")
                     if activity_type is None:
                         activity_type = "Unknown"
-                        
-                    timestamp = props.get("hs_timestamp")
-                    date_time = None
-                    
-                    # Format timestamp
-                    if timestamp:
+
+                    engagement_timestamp = engagement_properties.get("hs_timestamp")
+                    engagement_date = None
+                    if engagement_timestamp:
                         try:
-                            # Try to handle as integer timestamp (milliseconds)
-                            date_time = datetime.fromtimestamp(int(timestamp) / 1000)
+                            engagement_date = datetime.fromtimestamp(int(engagement_timestamp) / 1000)
                         except (ValueError, TypeError):
-                            # Handle ISO format date string
                             try:
-                                date_string = timestamp.replace('Z', '+00:00')
-                                date_time = datetime.fromisoformat(date_string)
+                                engagement_date = datetime.fromisoformat(engagement_timestamp)
                             except (ValueError, TypeError, AttributeError):
-                                # If all parsing fails, try another format
                                 try:
-                                    date_time = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%fZ')
+                                    engagement_date = datetime.strptime(engagement_timestamp, '%Y-%m-%dT%H:%M:%S.%fZ')
                                 except (ValueError, TypeError):
-                                    date_time = datetime.now()  # Fallback
+                                    print(f"Failed to parse engagement timestamp {engagement_timestamp}. Skipping event {eng_id}.")
+                                    continue
                     else:
-                        continue  # Skip events without a timestamp
-                    
-                    # Get content and subject based on activity type
+                        print(f"Skipping event {eng_id} without a timestamp.")
+                        continue
+
                     subject = ""
                     content = ""
                     
                     if activity_type == "EMAIL" or activity_type == "INCOMING_EMAIL":
-                        subject = props.get('hs_email_subject', 'No subject')
-                        content = props.get('hs_email_text', '')
+                        subject = engagement_properties.get('hs_email_subject', 'No subject')
+                        content = engagement_properties.get('hs_email_text', '')
                         display_type = "Incoming Email" if activity_type == "INCOMING_EMAIL" else "Outgoing Email"
                     elif activity_type == "CALL":
-                        content = props.get("hs_call_body", '')
+                        content = engagement_properties.get("hs_call_body", '')
                         display_type = "Call"
                     elif activity_type == "MEETING":
-                        subject = props.get('hs_meeting_title', 'Untitled meeting')
+                        subject = engagement_properties.get('hs_meeting_title', 'Untitled meeting')
                         print("Meeting. Subject: ", subject)
-                        content = props.get('hs_meeting_body', '')
+                        content = engagement_properties.get('hs_meeting_body', '')
                         display_type = "Meeting"
                     elif activity_type == "TASK":
-                        content = props.get("hs_task_body", '')
+                        content = engagement_properties.get("hs_task_body", '')
                         display_type = "Task"
                     elif activity_type == "NOTE":
-                        content = props.get("hs_note_body", '')
+                        content = engagement_properties.get("hs_note_body", '')
                         display_type = "Note"
                     else:
                         display_type = activity_type.replace("_", " ").title()
@@ -576,26 +613,27 @@ class HubspotService:
                         subject = ""
 
                     # Create a unique event ID
-                    event_id = f"{eng_id}_{date_time.strftime('%Y%m%d%H%M')}"
+                    event_id = f"{eng_id}_{engagement_date.strftime('%Y%m%d%H%M')}"
 
                     buyer_intent = {"intent": "N/A", "explanation": "N/A"}
                     if display_type == "Meeting":
                         print("Getting the intent analysis data for meeting: ", subject)
                         result = self.gong_service.get_buyer_intent(
                             call_title=subject.strip(), 
-                            call_date=date_time.strftime('%Y-%m-%d'),
+                            call_date=engagement_date.strftime('%Y-%m-%d'),
                             seller_name="Galileo"
                         )
+
                         if result is not None:
-                            # Only use the result if both intent and explanation are valid
                             if (result.get("intent") and result.get("intent") != "N/A" and 
                                 result.get("summary") and isinstance(result.get("summary"), dict)):
                                 buyer_intent = {
                                     "intent": result.get("intent", "N/A"),
                                     "explanation": result.get("summary", {})
                                 }
+                                print("Created the Buyer intent dictionary with intent and explanation: ", buyer_intent)
                             else:
-                                print(f"Invalid buyer intent data for meeting {subject}: intent={result.get('intent')}, summary={result.get('summary')}")
+                                print(f"Invalid buyer intent data! Doing N/A.")
                                 buyer_intent = {"intent": "N/A", "explanation": "N/A"}
 
                     # Get sentiment for content
@@ -629,8 +667,8 @@ class HubspotService:
                     event = {
                         "id": event_id,
                         "engagement_id": eng_id,
-                        "date_str": date_time.strftime('%Y-%m-%d'),
-                        "time_str": date_time.strftime('%H:%M'),
+                        "date_str": engagement_date.strftime('%Y-%m-%d'),
+                        "time_str": engagement_date.strftime('%H:%M'),
                         "type": display_type,
                         "subject": subject,
                         "content": content,
@@ -639,7 +677,7 @@ class HubspotService:
                         "buyer_intent": buyer_intent["intent"],
                         "buyer_intent_explanation": buyer_intent["explanation"]
                     }
-                    
+
                     if event.get("type") == "Meeting":
                         for prefix in prefixes:
                             event['subject'] = event['subject'].replace(prefix, "").strip()
@@ -673,42 +711,51 @@ class HubspotService:
                         timeline_events.append(event)
                     
                     # Track first and last engagement dates
-                    if start_engagement_date is None or date_time < start_engagement_date:
-                        start_engagement_date = date_time
-                    if latest_engagement_date is None or date_time > latest_engagement_date:
-                        latest_engagement_date = date_time
+                    if start_engagement_date is None or engagement_date < start_engagement_date:
+                        start_engagement_date = engagement_date
+                    if latest_engagement_date is None or engagement_date > latest_engagement_date:
+                        latest_engagement_date = engagement_date
                         
                 except Exception as e:
                     continue
 
             # Get additional meetings from Gong
             company_name = extract_company_name(deal_name)
+
             print("Getting additional meetings from Gong for company: ", company_name)
-            gong_meetings_events = self.gong_service.get_additional_meetings(company_name, timeline_events)
-            if gong_meetings_events:
-                # Add Gong meetings, checking for duplicates
-                for event in gong_meetings_events:
-                    if event.get("type") == "Meeting":
-                        subject_key = f"{event['subject'].lower().strip()}_{event['date_str']}"
-                        if subject_key not in seen_subjects:
+
+            sd, ed = date_range
+
+            print("Date range: ", sd, ed)
+            print(type(sd), type(ed))
+
+            current = sd
+            while current <= ed:
+                gong_meetings = self.gong_service.get_additional_meetings(company_name, timeline_events, current.strftime('%Y-%m-%d'))
+
+                if gong_meetings and len(gong_meetings) > 0:
+                    for event in gong_meetings:
+                        if event.get("type") == "Meeting":
+                            subject_key = f"{event['subject'].lower().strip()}_{event['date_str']}"
+                            if subject_key not in seen_subjects:
+                                timeline_events.append(event)
+                                seen_subjects.add(subject_key)
+                        else:
                             timeline_events.append(event)
-                            seen_subjects.add(subject_key)
-                    else:
-                        timeline_events.append(event)
-                
-                # Recalculate end_date to include Gong meetings
-                for event in gong_meetings_events:
-                    try:
-                        event_date = datetime.strptime(f"{event['date_str']} {event['time_str']}", "%Y-%m-%d %H:%M")
-                        event_date = event_date.replace(tzinfo=timezone.utc)
-                        
-                        if latest_engagement_date and latest_engagement_date.tzinfo is None:
-                            latest_engagement_date = latest_engagement_date.replace(tzinfo=timezone.utc)
+                    
+                    for event in gong_meetings:
+                        try:
+                            event_date = datetime.strptime(f"{event['date_str']} {event['time_str']}", "%Y-%m-%d %H:%M")
+                            event_date = event_date.replace(tzinfo=timezone.utc)
                             
-                        if latest_engagement_date is None or event_date > latest_engagement_date:
-                            latest_engagement_date = event_date
-                    except (ValueError, TypeError) as e:
-                        continue
+                            if latest_engagement_date and latest_engagement_date.tzinfo is None:
+                                latest_engagement_date = latest_engagement_date.replace(tzinfo=timezone.utc)
+                                
+                            if latest_engagement_date is None or event_date > latest_engagement_date:
+                                latest_engagement_date = event_date
+                        except (ValueError, TypeError) as e:
+                            continue
+                current += timedelta(days=1)
 
             # Sort events by date
             timeline_events.sort(key=lambda x: (x["date_str"], x["time_str"]))
@@ -883,12 +930,3 @@ class HubspotService:
             
         except Exception as e:
             return 0
-
-def main():
-    service = HubspotService()
-    
-    timeline = service.get_deal_timeline("Coveo-New Deal")
-    print(timeline)
-
-if __name__ == "__main__":
-    main()

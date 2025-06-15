@@ -28,7 +28,19 @@ class DataSyncService:
         self.meeting_insights_repo = MeetingInsightsRepository()
         self.company_overview_repo = CompanyOverviewRepository()
 
-    def sync(self, stage: str = "all", epoch0: str = "2025-02-15") -> None:
+    def sync(self, stage: str = "all", epoch0: int = 0) -> None:
+        """
+        Sync data for all deals within the specified date range.
+        Args:
+            stage: Pipeline stage to filter deals (default: "all")
+            epoch0: Number of days to look back from today (default: 3)
+        """
+        # Calculate date range
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=epoch0)
+        
+        print(Fore.MAGENTA + f"Syncing data from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}" + Style.RESET_ALL)
+
         all_deals = self.hubspot_service.get_all_deals()
 
         if stage != "all":
@@ -38,7 +50,6 @@ class DataSyncService:
             ]
             print(Fore.MAGENTA + f"Filtered to the {len(all_deals)} deals in stage '{stage}'" + Style.RESET_ALL) 
 
-
         for deal in all_deals:
             try:
                 deal_name = deal.get("dealname")
@@ -46,18 +57,16 @@ class DataSyncService:
                     continue
 
                 print(Fore.YELLOW + f"\n### Syncing Deal Info, Insights & Timeline: {deal_name} ###" + Style.RESET_ALL)
-                
-                self.sync_global_deal_data(deal_name, epoch0)
+                # Sync company overview (this doesn't depend on date range)
                 self.sync_company_overviews(deal_name)
+                
+                # Sync global deal data for the date range
+                self.sync_global_deal_data(deal_name, start_date, end_date)
 
-                current_date = datetime.strptime(epoch0, "%Y-%m-%d")
-                end_date = datetime.strptime(datetime.now().strftime("%Y-%m-%d"), "%Y-%m-%d")
-
-                print(Fore.YELLOW + f"\n### Syncing Meeting Data: {deal_name} from {epoch0} to {end_date.strftime('%Y-%m-%d')} ###" + Style.RESET_ALL)
-
+                # Sync meeting data for each day in the range
+                current_date = start_date
                 while current_date <= end_date:
-                    current_date_str = current_date.strftime("%Y-%m-%d")
-                    self._sync_meeting_insights(deal_name, current_date_str)
+                    self._sync_meeting_insights(deal_name, current_date.strftime("%Y-%m-%d"))
                     current_date += timedelta(days=1)
 
             except Exception as e:
@@ -66,31 +75,28 @@ class DataSyncService:
                 
         return
 
-    def sync_global_deal_data(self, deal_name: str, epoch0: str) -> None:
+    def sync_global_deal_data(self, deal_name: str, start_date: datetime, end_date: datetime) -> None:
+        """
+        Sync global deal data within the specified date range.
+        Args:
+            deal_name: Name of the deal to sync
+            start_date: Start date for the sync period
+            end_date: End date for the sync period
+        """
 
-        stats = {
-            "deal_info_updated": False,
-            "activities_synced": 0,
-            "meetings_synced": 0,
-            "timeline_events": 0,
-            "errors": []
-        }
 
         try:
-
-            self._sync_deal_info(deal_name, epoch0) ### Global
-            self._sync_deal_insights(deal_name, epoch0) ### Global
-            self._sync_timeline_events(deal_name, epoch0) ### Global
-
+            self._sync_deal_info(deal_name)
+            self._sync_deal_insights(deal_name, start_date, end_date)
+            self._sync_timeline_events(deal_name, start_date, end_date)
             return
 
         except Exception as e:
             print(Fore.RED + f"Unexpected error in sync_deal_data: {str(e)}" + Style.RESET_ALL)
             return
 
-    def _sync_deal_info(self, deal_name: str, epoch0: str) -> None:
+    def _sync_deal_info(self, deal_name: str) -> None:
         try:
-
             hubspot_deal = self._get_hubspot_deal_info(deal_name)
             if not hubspot_deal:
                 print(Fore.RED + f"Could not find deal '{deal_name}' in HubSpot" + Style.RESET_ALL)
@@ -109,7 +115,7 @@ class DataSyncService:
                     amount = "N/A"
 
             deal_info = {
-                "deal_id": hubspot_deal.get("dealId", deal_name),  # Use HubSpot ID if available
+                "deal_id": hubspot_deal.get("dealId", deal_name),
                 "deal_name": deal_name,
                 "company_name": company_name,
                 "stage": hubspot_deal.get("stage", "Unknown"),
@@ -119,7 +125,6 @@ class DataSyncService:
                 "last_modified_date": datetime.now()
             }
 
-            # Update in MongoDB
             print(Fore.BLUE + f"[MongoDB] Updating DealInfo for {deal_name}." + Style.RESET_ALL)
             self.deal_info_repo.upsert_deal(deal_name, deal_info)
 
@@ -165,31 +170,24 @@ class DataSyncService:
         except (ValueError, TypeError):
             return datetime.now()
 
-    def _sync_deal_insights(self, deal_name: str, epoch0: str) -> None:
-
+    def _sync_deal_insights(self, deal_name: str, start_date: datetime, end_date: datetime) -> None:
         company_name = extract_company_name(deal_name)
-
-        # loop each day from epoch0 to today
-        start_date = datetime.strptime(epoch0, "%Y-%m-%d")
-        end_date = datetime.now()
-
         concerns = []
+        current_date = start_date
 
-        while start_date <= end_date:
-            current_date = start_date.strftime("%Y-%m-%d")
+        while current_date <= end_date:
+            current_date_str = current_date.strftime("%Y-%m-%d")
 
             # check if a call exists for this deal on this date
-            calls = self.gong_service.list_calls(current_date)
+            calls = self.gong_service.list_calls(current_date_str)
             call_id = self.gong_service.get_call_id(calls, company_name)
 
-            if not call_id:
-                start_date += timedelta(days=1)
-                continue
+            if call_id:
+                concerns.append(self.gong_service.get_concerns(deal_name, current_date_str))
+            
+            current_date += timedelta(days=1)
 
-            concerns.append(self.gong_service.get_concerns(deal_name, current_date))
-            start_date += timedelta(days=1)
-
-        if len(concerns) > 0:
+        if concerns:
             deal_insights_data = self._create_deal_insights_data(deal_name, concerns)
             print(Fore.BLUE + f"[MongoDB] Updating DealInsights for {deal_name}." + Style.RESET_ALL)
             self.deal_insights_repo.upsert_activity(deal_name, deal_insights_data)
@@ -226,7 +224,6 @@ class DataSyncService:
         }
 
     def _sync_meeting_insights(self, deal_name: str, date_str: str, force_update: bool = False) -> None:
-
         try:
             calls = self.gong_service.list_calls(date_str)
             company_name = extract_company_name(deal_name)
@@ -236,7 +233,6 @@ class DataSyncService:
                 meeting_id = f"{deal_name}_{date_str}"
                 self.meeting_insights_repo.upsert_meeting(deal_name, meeting_id, {"meeting_date": date_str})
             
-            # Get meeting insights for each meeting
             for meeting in meetings:
                 meeting_id = meeting.get("meeting_id")
                 if not meeting_id:
@@ -269,10 +265,19 @@ class DataSyncService:
             print(Fore.RED + f"Error syncing meeting insights for deal {deal_name} on {date_str}: {str(e)}" + Style.RESET_ALL)
             raise
 
-    def _sync_timeline_events(self, deal_name: str, epoch0: str) -> None:
+    def _sync_timeline_events(self, deal_name: str, start_date: datetime, end_date: datetime) -> None:
         try:
             print(Fore.YELLOW + f"Syncing timeline events for {deal_name}." + Style.RESET_ALL)
             timeline_data = self.hubspot_service.get_deal_timeline(deal_name)
+            
+            # Filter events to only include those within our date range
+            if timeline_data and "events" in timeline_data:
+                filtered_events = [
+                    event for event in timeline_data["events"]
+                    if start_date <= datetime.strptime(event["date_str"], "%Y-%m-%d") <= end_date
+                ]
+                timeline_data["events"] = filtered_events
+                
             self.deal_timeline_repo.upsert_timeline(deal_name, timeline_data)
         except Exception as e:
             print(Fore.RED + f"Error getting timeline data: {str(e)}" + Style.RESET_ALL)
@@ -297,23 +302,28 @@ class DataSyncService:
             print(Fore.RED + f"Error syncing company overviews: {str(e)}" + Style.RESET_ALL)
             raise
 
-    def sync_single_deal(self, deal_name: str, epoch0: str = "2025-02-15") -> None:
+    def sync_single_deal(self, deal_name: str, epoch0: int = 3) -> None:
+        """
+        Sync data for a single deal within the specified date range.
+        Args:
+            deal_name: Name of the deal to sync
+            epoch0: Number of days to look back from today (default: 3)
+        """
         try:
-            print(Fore.YELLOW + f"\n### Syncing Global Data for: {deal_name} ###" + Style.RESET_ALL)
+            # Calculate date range
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=epoch0)
             
-            # Sync global deal data (deal info, insights, timeline)
-            self.sync_global_deal_data(deal_name, epoch0)
+            print(Fore.YELLOW + f"\n### Syncing Global Data for: {deal_name} from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} ###" + Style.RESET_ALL)
+            
+            # Sync global deal data
+            self.sync_global_deal_data(deal_name, start_date, end_date)
             
             # Sync company overview
-            # self.sync_company_overviews(deal_name)
+            self.sync_company_overviews(deal_name)
 
-            # Sync meeting data from epoch0 to today
-            today = datetime.now().strftime("%Y-%m-%d")
-            current_date = datetime.strptime(epoch0, "%Y-%m-%d")
-            end_date = datetime.strptime(today, "%Y-%m-%d")
-
-            print(Fore.YELLOW + f"\n### Syncing Meeting Data for: {deal_name} from {epoch0} to {today} ###" + Style.RESET_ALL)
-
+            # Sync meeting data for each day in the range
+            current_date = start_date
             while current_date <= end_date:
                 current_date_str = current_date.strftime("%Y-%m-%d")
                 self._sync_meeting_insights(deal_name, current_date_str)

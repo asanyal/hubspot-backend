@@ -65,12 +65,10 @@ class DealTimelineRepository(BaseRepository):
         Returns:
             bool: True if successful, False otherwise
         """
-        # Transform the event to match our schema
         event_date = datetime.strptime(
             f"{event['date_str']} {event['time_str']}", 
             "%Y-%m-%d %H:%M"
         )
-        
         transformed_event = {
             "event_id": event['id'],
             "event_type": event['type'],
@@ -89,4 +87,21 @@ class DealTimelineRepository(BaseRepository):
                 "$push": {"events": transformed_event},
                 "$set": {"last_updated": datetime.utcnow()}
             }
-        ) 
+        )
+
+    def remove_event(self, deal_id: str, event: Dict) -> bool:
+        """
+        Remove a single event from the timeline
+        Args:
+            deal_id: The deal ID
+            event: Event dictionary to remove
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        return self.update_one(
+            {"deal_id": deal_id},
+            {
+                "$pull": {"events": event},
+                "$set": {"last_updated": datetime.utcnow()}
+            }
+        )
