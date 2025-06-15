@@ -306,28 +306,16 @@ async def get_contacts_and_champion(
                 "champions_count": 0
             }
             
-        # Collect all champions from all meetings
-        all_champions = []
+        all_attendees = []
+        champions = []
         for meeting in meeting_info:
-            if meeting.get('champion_analysis'):
-                all_champions.extend(meeting['champion_analysis'])
-        
-        # Remove duplicates based on email
-        unique_champions = {champ["email"]: champ for champ in all_champions}.values()
-        champions_count = sum(1 for champ in unique_champions if champ.get("champion", False))
-        
-        # If no champions found, return string instead of empty list
-        if not unique_champions:
-            return {
-                "contacts": "No contacts found",
-                "total_contacts": 0,
-                "champions_count": 0
-            }
+            if meeting.get('buyer_attendees'):
+                all_attendees.extend(meeting['buyer_attendees'])
         
         return {
-            "contacts": list(unique_champions),
-            "total_contacts": len(unique_champions),
-            "champions_count": champions_count
+            "contacts": list(all_attendees),
+            "total_attendees": len(all_attendees),
+            "champions_count": len(champions)
         }
     except Exception as e:
         print(Fore.RED + f"Error in contacts-and-champion endpoint: {str(e)}" + Style.RESET_ALL)

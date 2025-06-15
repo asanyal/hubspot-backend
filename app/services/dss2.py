@@ -278,7 +278,7 @@ class DataSyncService2:
                                 print(f"Removing older event with subject: {subject}")
                                 self.deal_timeline_repo.remove_event(deal_name, existing_events_by_subject[subject])
                             # Add the new event
-                            print(f"Adding new event with subject: {subject}")
+                            print(Fore.YELLOW + f"Adding new event with subject: {subject}" + Style.RESET_ALL)
                             self.deal_timeline_repo.add_event(deal_name, new_event)
                 else:
                     timeline_data["last_updated"] = datetime.now()
@@ -289,22 +289,33 @@ class DataSyncService2:
 
     def _sync_meeting_insights(self, deal_name: str, date_str: str) -> None:
         try:
+
             calls = self.gong_service.list_calls(date_str)
+            print(Fore.BLUE + f"Total calls on {date_str}: {len(calls)}" + Style.RESET_ALL)
+
             company_name = extract_company_name(deal_name)
+            print(f"Company name: {company_name}")
+
             call_id = self.gong_service.get_call_id(calls, company_name)
             
             if call_id:
-                
+                print(Fore.GREEN + f"Found 1 call match for {company_name} on {date_str}" + Style.RESET_ALL)    
                 insights = self.gong_service.get_meeting_insights(call_id)
 
                 if insights:
                     insights["deal_name"] = deal_name
                     insights["date"] = date_str
                     
+                    # Ensure buyer_attendees is included
+                    if "buyer_attendees" not in insights:
+                        insights["buyer_attendees"] = []
+                    
                     print(Fore.BLUE + f"[MongoDB] Updating MeetingInsights for {deal_name}" + Style.RESET_ALL)
                     meeting_id = f"{deal_name}_{date_str}"
                     self.meeting_insights_repo.upsert_meeting(deal_name, meeting_id, insights)
-                    
+            else:
+                print(Fore.RED + f"No call found for {company_name} on {date_str}" + Style.RESET_ALL)
+
         except Exception as e:
             print(Fore.RED + f"Error syncing meeting insights: {str(e)}" + Style.RESET_ALL)
 

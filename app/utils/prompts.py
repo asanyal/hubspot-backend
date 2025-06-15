@@ -45,7 +45,7 @@ company_name_prompt = """
     INSTRUCTIONS:
     1. The returned list should be comma separated.
     2. If the title contains " - New Deal", extract everything before it
-    3. Exclude suffixes like "inc", "llc", "holdings", "technologies", "group", "corp", "company", "corporation" etc. from the company name
+    3. Exclude suffixes like "inc", "llc", "holdings", "technologies", "corp", "company", "corporation" etc. from the company name
     4. For a healthcare company, EXCLUDE "health" or "healthcare" from the company name
     5. Return multiple possible variants of the company name, if applicable, such as abbreviations or common short forms (separated by spaces)
     6. If you cannot find the company name, return "Unknown Company"
@@ -56,12 +56,18 @@ company_name_prompt = """
     11. Gong, Zoom, Teams are not companies.
     e.g. "Deutsche Bank - Bank on Tech (BOT)". In this case, extract both the company name, the team name and all abbreviations possible e.g. "Deutsche Bank, DB, Bank of Tech, BOT"
 
-    For companies that are well known by their short form, INCLUDE the short form in the output (separated by commas):
+    For companies that have a short form, INCLUDE the short form in the output (separated by commas):
     - "American Express" -> "American Express, Amex"
     - "Deutsche Bank" -> "Deutsche Bank, DB"
     - "Deutsche Telekom" -> "Deutsche Telekom, DT"
     - "FreshWorks" -> "FreshWorks, FW"
     - "Bank of America" -> "Bank of America, BofA"
+
+    For companies with multiple words, include the abbreviation of the first word in the output.
+    - "Deutsche Bank" -> "Deutsche Bank, DB"
+    - "Deutsche Telekom" -> "Deutsche Telekom, DT"
+    - "Automation Anywhere" -> "Automation Anywhere, AA"
+    - "London Stock Exchange Group" -> "London Stock Exchange Group, LSEG"
 
     Some companies have multiple names:
     - "DemandMatrix" -> "DemandBase"

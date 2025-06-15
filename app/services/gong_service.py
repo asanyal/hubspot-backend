@@ -135,6 +135,7 @@ class GongService:
         for gong_call in calls_from_gong:
             title_words = set(gong_call.get("title", "").split())
             for synonym in company_synonyms:
+                synonym = synonym.strip()
                 if synonym in title_words:
                     return str(gong_call["id"])
         
@@ -267,6 +268,7 @@ class GongService:
 
     def get_buyer_intent_json(self, call_transcript, seller_name) -> Dict:
         try:
+            print("Getting buyer intent.")
             response = ask_openai(
                 user_content=buyer_intent_prompt.format(call_transcript=call_transcript, seller_name=seller_name),
                 system_content="You are a smart Sales Analyst that analyzes Sales calls."
@@ -274,8 +276,6 @@ class GongService:
             
             # Clean the response by replacing newlines with spaces
             response = response.replace('\n', ' ')
-
-            print(Fore.GREEN + f"Buyer intent response: {response}" + Style.RESET_ALL)
             
             # Try to parse as JSON
             try:
@@ -375,7 +375,6 @@ class GongService:
 
                 # Get buyer intent analysis for the transcript
                 buyer_intent = self.get_buyer_intent_json(full_transcript, seller_name)
-                print("In the function get_buyer_intent, output of get_buyer_intent_json: ", buyer_intent)
                 return buyer_intent
             
             return default_response
@@ -702,73 +701,106 @@ class GongService:
 
     def get_meeting_insights(self, call_id: str) -> Dict:
         headers = {'Content-Type': 'application/json'}
+
+        # Step 1: Get transcript
         transcript_url = 'https://us-5738.api.gong.io/v2/calls/transcript'
-        transcript_payload = {
-            "filter": {
-                "callIds": [str(call_id)]
+        transcript_payload = {"filter": {"callIds": [str(call_id)]}}
+        transcript_response = requests.post(
+            transcript_url,
+            auth=(self.access_key, self.client_secret),
+            headers=headers,
+            json=transcript_payload
+        )
+        transcript_data = transcript_response.json()
+
+        # Step 2: Extract speakerIds and full transcript
+        speaker_ids = set()
+        buyer_transcripts = ""
+        for transcript in transcript_data.get("callTranscripts", []):
+            for part in transcript.get("transcript", []):
+                speaker_id = part.get("speakerId", "unknown")
+                speaker_ids.add(speaker_id)
+                for sentence in part.get("sentences", []):
+                    buyer_transcripts += sentence.get("text", "") + " "
+
+        print(f"{len(speaker_ids)} speakers detected on the buyer side.")
+        
+        # Step 3: Get speaker info using /v2/calls/extensive
+        extensive_url = "https://us-5738.api.gong.io/v2/calls/extensive"
+        extensive_payload = {
+            "filter": {"callIds": [str(call_id)]},
+            "contentSelector": {
+                "exposedFields": {
+                    "parties": True,
+                    "interaction": {"speakers": True}
+                }
             }
         }
 
-        transcript_response = requests.post(
-            transcript_url, 
-            auth=(self.access_key, self.client_secret), 
-            headers=headers, 
-            json=transcript_payload
+        extensive_response = requests.post(
+            extensive_url,
+            auth=(self.access_key, self.client_secret),
+            headers=headers,
+            json=extensive_payload
         )
-            
-        transcript_data = transcript_response.json()
 
-        call_url = f'https://us-5738.api.gong.io/v2/calls/{call_id}'
-        call_response = requests.get(
-            call_url,
-            auth=(self.access_key, self.client_secret)
-        )
-        
-        call = call_response.json().get("call", {})
+        buyer_attendees = []
+        if extensive_response.ok:
+            calls_data = extensive_response.json().get("calls", [])
+            for call_data in calls_data:
+                for party in call_data.get("parties", []):
+                    print(f"Party: {party}")
+                    email_address = party.get("emailAddress", "")
+                    name = party.get("name", "Unknown name")
+                    title = party.get("title", "Unknown title")
+                    affiliation = party.get("affiliation", "Unknown affiliation")
 
-        buyer_transcripts = ""
+                    if affiliation != "Internal":
+                        if email_address and "galileo.ai" not in email_address.lower():
+                            buyer_attendees.append({
+                                "name": name,
+                                "email": email_address,
+                                "title": title
+                            })
+                        elif name:
+                            buyer_attendees.append({
+                                "name": name,
+                                "title": title
+                            })
 
-        if "callTranscripts" in transcript_data:
-            for transcript in transcript_data["callTranscripts"]:
-                for part in transcript.get("transcript", []):
-                    speaker_id = part.get("speakerId", "unknown")
-                    
-                    # Extract and concatenate all sentences from this speaker
-                    if "sentences" in part:
-                        for sentence in part["sentences"]:
-                            buyer_transcripts += sentence.get("text", "") + " "
-
+        # Step 5: Run intent detection
         buyer_intent = self.get_buyer_intent_json(
             buyer_transcripts,
             "Galileo",
         )
 
-        # TODO: Figure out a new way to get champions
-        champions = [
-            {
-                "email": "Not computed",
-                "speakerName": "Not computed",
-                "champion": False,
-                "explanation": "Not computed",
-                "parr_analysis": {
-                    "power": False,
-                    "authority": False,
-                    "resources": False,
-                    "relevance": False,
-                    "explanation": "Not computed"
-                }
+        champions = [{
+            "email": "Not computed",
+            "speakerName": "Not computed",
+            "champion": False,
+            "explanation": "Not computed",
+            "parr_analysis": {
+                "power": False,
+                "authority": False,
+                "resources": False,
+                "relevance": False,
+                "explanation": "Not computed"
             }
-        ]        
+        }]
 
-        # Compile insights
+        call_url = f'https://us-5738.api.gong.io/v2/calls/{call_id}'
+        call_response = requests.get(call_url, auth=(self.access_key, self.client_secret))
+        call = call_response.json().get("call", {})
+
         insights = {
             "meeting_id": call_id,
             "meeting_title": call.get("title", ""),
-            "meeting_date": call.get("scheduled", "").split("T")[0],
+            "meeting_date": call.get("scheduled", "").split("T")[0] if "scheduled" in call else "",
             "buyer_intent": buyer_intent,
             "champion_analysis": champions,
             "topics": "",
-            "transcript": buyer_transcripts,
+            "transcript": buyer_transcripts.strip(),
+            "buyer_attendees": buyer_attendees,
             "last_updated": datetime.now(timezone.utc).isoformat()
         }
 
