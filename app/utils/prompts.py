@@ -204,12 +204,13 @@ Return a **valid JSON object** with:
    - `"Neutral"`
    - `"Less likely to buy"`
 
-2. `"summary"`: A **sectioned markdown-style breakdown**, with headers that best fit this conversation. These should capture core discussion themes and contain **short, precise bullet points** under each header.
+2. `"summary"`: A **sectioned markdown-style breakdown**, with headers that best fit this conversation. These should capture core discussion themes and contain **short, precise bullet points** under each header. If present, a header capturing the buyer's use case should be present.
 
    - Do not use fixed headers like "Background" or "Pain Points" — instead, **generate section headers that match the content.**
    - Bullet points should be objective, factual, and concise.
    - Where possible, **name specific individuals** in the transcript (e.g., "Vikram mentioned…", "Nikhil asked…").
    - You may include both technical and business details if relevant.
+   - Try and include a header for the buyer's use case if mentioned. If the buyer's use case is not clear, do not include a header for it.
 
 ---
 
