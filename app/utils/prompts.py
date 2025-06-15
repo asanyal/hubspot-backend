@@ -174,47 +174,49 @@ parr_principle_prompt = """
 buyer_intent_prompt = """
 Analyze the following sales call transcript between the Galileo team and a potential buyer.
 
-Your objective is to evaluate the **buyer's purchasing intent**, using only explicit, action-oriented verbal evidence from the transcript. DO NOT infer based on tone, politeness, or vague enthusiasm.
+Your task is to evaluate the **buyer's purchasing intent**, based only on explicit, action-oriented verbal evidence in the transcript. Ignore tone, politeness, or general enthusiasm.
+
+Additionally, identify and summarize any **buyer use cases**, **pain points**, or **goals** related to why they are exploring a Generative AI Evaluation/Observability solution like Galileo. This includes what they are trying to build, measure, improve, or solve — especially related to agent workflows, RAG pipelines, LLM quality, or internal AI initiatives.
 
 ---
 
-**Important: Do NOT assume intent based on positive sentiment.**  
-Only consider explicit behaviors such as pricing discussions, implementation plans, urgency, or stated blockers.
+**Important: Do NOT infer intent from positive sentiment.**  
+Only consider specific behaviors like pricing discussions, implementation interest, urgency, technical blockers, or organizational alignment.
 
 ---
 
 **Examples of Strong Buying Intent ("Likely to Buy")**
 - Asking for pricing, pilot, or implementation steps
-- Describing specific, urgent pain points Galileo addresses
-- Assigning team members or setting evaluation/buying timelines
-- Mentioning internal alignment, champions, or budget
+- Stating clear, urgent problems Galileo could help solve
+- Mentioning champions, timelines, or internal coordination
+- Confirming budget alignment or deployment interest
 
 **Examples of Disinterest or Blockers ("Less Likely to Buy")**
-- Expressing doubt about Galileo's value or overlap with existing tools
-- Highlighting blockers or bugs
-- Deflecting next steps or commitment
-- Stating misalignment or lack of decision-making power
+- Expressing confusion about Galileo’s value or overlap
+- Highlighting technical or organizational blockers
+- Stalling or deflecting next steps
+- Stating they are not decision-makers or not ready
 
 ---
 
 Return a **valid JSON object** with:
 
-1. `"intent"`: Must be one of:
+1. `"intent"`: One of:
    - `"Likely to buy"`
    - `"Neutral"`
    - `"Less likely to buy"`
 
-2. `"summary"`: A **sectioned markdown-style breakdown**, with headers that best fit this conversation. These should capture core discussion themes and contain **short, precise bullet points** under each header. If present, a header capturing the buyer's use case should be present.
+2. `"summary"`: A **sectioned, markdown-style breakdown** using dynamic headers that reflect themes from the transcript.
 
-   - Do not use fixed headers like "Background" or "Pain Points" — instead, **generate section headers that match the content.**
-   - Bullet points should be objective, factual, and concise.
-   - Where possible, **name specific individuals** in the transcript (e.g., "Vikram mentioned…", "Nikhil asked…").
-   - You may include both technical and business details if relevant.
-   - Try and include a header for the buyer's use case if mentioned. If the buyer's use case is not clear, do not include a header for it.
+   - Use custom section headers (e.g., “Use Case: Internal Agent Eval Platform” or “Concerns About Integration”) based on the actual content.
+   - Do **not** use fixed labels like “Pain Points” or “Background.”
+   - Bullet points must be concise, objective, and traceable to what was said.
+   - Mention individuals by name if they appear in the transcript (e.g., “Maya asked…”).
+   - If the buyer's use case or problem is clearly stated, include it as a section header with bullet points. If unclear, do not fabricate.
 
 ---
 
-Return ONLY the JSON string. Do not include any additional text or commentary or any prefix or suffix.
+Return ONLY the JSON string. Do not include any extra commentary, prefix, or suffix.
 
 Seller: {seller_name}  
 Transcript: {call_transcript}
