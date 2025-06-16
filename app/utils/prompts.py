@@ -192,9 +192,9 @@ Only consider specific behaviors like pricing discussions, implementation intere
 ---
 
 **Examples of Strong Buying Intent ("Likely to Buy")**
-- Asking for pricing, pilot, or implementation steps
+- Asking for pricing, pilot/POV/trial/POC, or implementation steps
+- Clearly very impressed by Galileo's value (praise, excitement, etc.)
 - Stating clear, urgent problems Galileo could help solve
-- Mentioning champions, timelines, or internal coordination
 - Confirming budget alignment or deployment interest
 
 **Examples of Disinterest or Blockers ("Less Likely to Buy")**
@@ -215,8 +215,10 @@ Return a **valid JSON object** with:
 2. `"summary"`: A **sectioned, markdown-style breakdown** using dynamic headers that reflect themes from the transcript.
 
    - Use custom section headers (e.g., “Use Case: Internal Agent Eval Platform” or “Concerns About Integration”) based on the actual content.
-   - Do **not** use fixed labels like “Pain Points” or “Background.”
+   - Address the buyer by name (don't call them "the buyer" if possible).
+   - Do **not** use fixed labels.
    - Bullet points must be concise, objective, and traceable to what was said.
+   - Include information about their Gen AI use case and pain points or challenges they are facing (if mentioned in the transcript).
    - Mention individuals by name if they appear in the transcript (e.g., “Maya asked…”).
    - If the buyer's use case or problem is clearly stated, include it as a section header with bullet points. If unclear, do not fabricate.
 

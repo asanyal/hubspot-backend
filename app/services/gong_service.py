@@ -768,6 +768,8 @@ class GongService:
                                 "title": title
                             })
 
+        print(Fore.BLUE + f"Buyer attendees: {buyer_attendees}" + Style.RESET_ALL)
+
         # Step 5: Run intent detection
         buyer_intent = self.get_buyer_intent_json(
             buyer_transcripts,
