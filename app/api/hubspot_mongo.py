@@ -158,17 +158,33 @@ async def get_all_deals():
     try:
         all_deals = deal_info_repo.get_all_deals()
         
-        deal_list = [
-            {
-                "id": index,  # Using index as ID since HubSpot IDs might be complex
-                "name": deal.get('deal_name', 'Unnamed Deal'),
-                "createdate": deal.get('created_date'),
-                "stage": deal.get('stage', 'Unknown Stage'),
-                "owner": "Unknown Owner" if not deal.get('owner') or deal.get('owner') == {} else deal.get('owner')
-            }
-            for index, deal in enumerate(all_deals)
-            if deal.get('deal_name')  # Skip deals without names
-        ]
+        # Get all deal names that have names
+        deal_names = [deal.get('deal_name') for deal in all_deals if deal.get('deal_name')]
+        
+        # Get all timeline data in one call
+        all_timeline_data = deal_timeline_repo.find_many({"deal_id": {"$in": deal_names}})
+        
+        # Create a lookup dictionary for quick access to activity counts
+        activity_counts = {}
+        for timeline in all_timeline_data:
+            deal_id = timeline.get('deal_id')
+            if deal_id:
+                activity_counts[deal_id] = len(timeline.get('events', []))
+        
+        deal_list = []
+        for index, deal in enumerate(all_deals):
+            if deal.get('deal_name'):  # Skip deals without names
+                deal_name = deal.get('deal_name')
+                
+                deal_info = {
+                    "id": index,  # Using index as ID since HubSpot IDs might be complex
+                    "name": deal_name,
+                    "createdate": deal.get('created_date'),
+                    "stage": deal.get('stage', 'Unknown Stage'),
+                    "owner": "Unknown Owner" if not deal.get('owner') or deal.get('owner') == {} else deal.get('owner'),
+                    "activities": activity_counts.get(deal_name, 0)
+                }
+                deal_list.append(deal_info)
         
         # Sort by createdate descending
         deal_list = sorted(deal_list, key=lambda x: x['createdate'], reverse=True)
