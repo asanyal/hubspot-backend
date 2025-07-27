@@ -155,10 +155,6 @@ class DataSyncService2:
     def _sync_deal_info(self, deal_name: str) -> None:
         """Sync deal info if it doesn't exist in MongoDB"""
         try:
-            # Check if deal exists in MongoDB
-            existing_deal = self.deal_info_repo.get_by_deal_id(deal_name)
-            if existing_deal:
-                return
 
             # Get deal info from HubSpot
             hubspot_deal = self._get_hubspot_deal_info(deal_name)
