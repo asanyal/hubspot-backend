@@ -132,11 +132,21 @@ class GongService:
                     return str(gong_call["id"])
         
         company_synonyms = company_name.split(",")
+
+        print(f"Company synonyms: {company_synonyms}")
+
         for gong_call in calls_from_gong:
+            
             title_words = set(gong_call.get("title", "").split())
+            print(f"-- Matching call title words: {title_words} with company synonyms: {company_synonyms}")
             for synonym in company_synonyms:
                 synonym = synonym.strip()
-                if synonym in title_words:
+                # Split synonym into tokens and convert to lowercase
+                synonym_tokens = set(synonym.lower().split())
+                title_words_lower = set(word.lower() for word in title_words)
+                
+                # Check if all tokens from synonym are present in title words
+                if synonym_tokens.issubset(title_words_lower):
                     return str(gong_call["id"])
         
         return None

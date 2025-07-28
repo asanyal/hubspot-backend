@@ -194,16 +194,27 @@ class DataSyncService2:
     def _sync_deal_insights(self, deal_name: str, date_str: str) -> None:
         """Sync deal insights for a specific date"""
         try:
+            print(f"Listing all the calls on date {date_str}")
             calls = self.gong_service.list_calls(date_str)
+            print(f"Found {len(calls)} calls on date {date_str}")
+            for call in calls:
+                if "title" in call:
+                    print(Fore.GREEN + f"Call: {call['title']}" + Style.RESET_ALL)
+            
             company_name = extract_company_name(deal_name)
+            print(f"Extracting call ID for a call with company name: {company_name}")
             call_id = self.gong_service.get_call_id(calls, company_name)
             
             new_concerns = []
             if call_id:
+                print(Fore.YELLOW + f"Found Call ID: {call_id}" + Style.RESET_ALL)
                 new_concerns = self.gong_service.get_concerns(deal_name, date_str)
                 if not isinstance(new_concerns, dict):
                     new_concerns = str(new_concerns)
-            
+                print(Fore.YELLOW + f"Concerns on date {date_str}: {new_concerns}" + Style.RESET_ALL)
+            else:
+                print(Fore.RED + f"Did not find a call for {company_name} on {date_str}" + Style.RESET_ALL)
+
             # Update insights data
             insights_data = {
                 "deal_id": deal_name,
