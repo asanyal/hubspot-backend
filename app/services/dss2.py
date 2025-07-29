@@ -205,48 +205,33 @@ class DataSyncService2:
             print(f"Extracting call ID for a call with company name: {company_name}")
             call_id = self.gong_service.get_call_id(calls, company_name)
             
-            new_concerns = []
             if call_id:
                 print(Fore.YELLOW + f"Found Call ID: {call_id}" + Style.RESET_ALL)
                 new_concerns = self.gong_service.get_concerns(deal_name, date_str)
                 if not isinstance(new_concerns, dict):
                     new_concerns = str(new_concerns)
                 print(Fore.YELLOW + f"Concerns on date {date_str}: {new_concerns}" + Style.RESET_ALL)
+                
+                if isinstance(new_concerns, dict):
+                    # Update insights data
+                    insights_data = {
+                        "deal_id": deal_name,
+                        "last_updated": datetime.now()
+                    }
+                    
+                    # Update counts based on new concerns
+                    pricing_concerns = new_concerns.get("pricing_concerns", {}).get("has_concerns", False)
+                    no_decision_maker = new_concerns.get("no_decision_maker", {}).get("is_issue", False)
+                    existing_vendor = new_concerns.get("already_has_vendor", {}).get("has_vendor", False)
+                    
+                    insights_data["pricing_concerns"] = 1 if pricing_concerns else 0
+                    insights_data["no_decision_maker"] = 1 if no_decision_maker else 0
+                    insights_data["existing_vendor"] = 1 if existing_vendor else 0
+                    
+                    print(Fore.BLUE + f"[MongoDB] Updating DealInsights with new concerns from {date_str}." + Style.RESET_ALL)
+                    self.deal_insights_repo.upsert_activity_with_concerns_list(deal_name, insights_data, new_concerns)
             else:
                 print(Fore.RED + f"Did not find a call for {company_name} on {date_str}" + Style.RESET_ALL)
-
-            # Update insights data
-            insights_data = {
-                "deal_id": deal_name,
-                "last_updated": datetime.now()
-            }
-            
-            # Update counts based on new concerns
-            if new_concerns:
-                insights_data["concerns"] = new_concerns
-                # Safely check concerns with proper error handling
-                pricing_concerns = any(
-                    isinstance(c, dict) and 
-                    c.get("pricing_concerns", {}).get("has_concerns", False) 
-                    for c in new_concerns
-                )
-                no_decision_maker = any(
-                    isinstance(c, dict) and 
-                    c.get("no_decision_maker", {}).get("is_issue", False) 
-                    for c in new_concerns
-                )
-                existing_vendor = any(
-                    isinstance(c, dict) and 
-                    c.get("already_has_vendor", {}).get("has_vendor", False) 
-                    for c in new_concerns
-                )
-                
-                insights_data["pricing_concerns"] = 1 if pricing_concerns else 0
-                insights_data["no_decision_maker"] = 1 if no_decision_maker else 0
-                insights_data["existing_vendor"] = 1 if existing_vendor else 0
-            
-            print(Fore.BLUE + f"[MongoDB] Updating DealInsights." + Style.RESET_ALL)
-            self.deal_insights_repo.upsert_activity(deal_name, insights_data)
             
         except Exception as e:
             print(Fore.RED + f"Error syncing deal insights: {str(e)}" + Style.RESET_ALL)

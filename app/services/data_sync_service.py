@@ -16,7 +16,9 @@ from app.utils.general_utils import extract_company_name
 from app.services.hubspot_service import HubspotService
 from app.services.firecrawl_service import get_company_analysis
 from app.core.config import settings
-from colorama import Fore, Style
+from colorama import Fore, Style, init
+
+init()
 
 class DataSyncService:
     def __init__(self):
@@ -172,7 +174,6 @@ class DataSyncService:
 
     def _sync_deal_insights(self, deal_name: str, start_date: datetime, end_date: datetime) -> None:
         company_name = extract_company_name(deal_name)
-        concerns = []
         current_date = start_date
 
         while current_date <= end_date:
@@ -183,33 +184,39 @@ class DataSyncService:
             call_id = self.gong_service.get_call_id(calls, company_name)
 
             if call_id:
-                concerns.append(self.gong_service.get_concerns(deal_name, current_date_str))
+                new_concerns = self.gong_service.get_concerns(deal_name, current_date_str)
+                if new_concerns:
+                    # Create base insights data without concerns
+                    deal_insights_data = self._create_deal_insights_data(deal_name, [new_concerns])
+                    # Remove concerns from the data since we'll handle it separately
+                    deal_insights_data.pop("concerns", None)
+                    
+                    print(Fore.BLUE + f"[MongoDB] Updating DealInsights for {deal_name} with new concerns from {current_date_str}." + Style.RESET_ALL)
+                    self.deal_insights_repo.upsert_activity_with_concerns_list(deal_name, deal_insights_data, new_concerns)
             
             current_date += timedelta(days=1)
 
-        if concerns:
-            deal_insights_data = self._create_deal_insights_data(deal_name, concerns)
-            print(Fore.BLUE + f"[MongoDB] Updating DealInsights for {deal_name}." + Style.RESET_ALL)
-            self.deal_insights_repo.upsert_activity(deal_name, deal_insights_data)
-
-    def _create_deal_insights_data(self, deal_name: str, concerns: Dict) -> Dict:
+    def _create_deal_insights_data(self, deal_name: str, concerns_list: List[Dict]) -> Dict:
         # pricing_concerns should be 1 if any of the concerns have a pricing concern
         pricing_concerns = 0
-        for concern in concerns:
+        for concern in concerns_list:
             if concern.get("pricing_concerns", {}).get("has_concerns", False):
                 pricing_concerns = 1
+                break
 
         # no_decision_maker should be 1 if any of the concerns have a no_decision_maker concern
         no_decision_maker = 0
-        for concern in concerns:
+        for concern in concerns_list:
             if concern.get("no_decision_maker", {}).get("is_issue", False):
                 no_decision_maker = 1
+                break
 
         # existing_vendor should be 1 if any of the concerns have an existing_vendor concern
         existing_vendor = 0
-        for concern in concerns:
+        for concern in concerns_list:
             if concern.get("already_has_vendor", {}).get("has_vendor", False):
                 existing_vendor = 1
+                break
 
         return {
             "deal_id": deal_name,
@@ -219,7 +226,7 @@ class DataSyncService:
             "pricing_concerns": pricing_concerns,
             "no_decision_maker": no_decision_maker,
             "existing_vendor": existing_vendor,
-            "concerns": concerns,
+            "concerns": concerns_list,
             "last_updated": datetime.now()
         }
 

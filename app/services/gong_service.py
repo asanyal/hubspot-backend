@@ -144,9 +144,9 @@ class GongService:
                 # Split synonym into tokens and convert to lowercase
                 synonym_tokens = set(synonym.lower().split())
                 title_words_lower = set(word.lower() for word in title_words)
-                
-                # Check if all tokens from synonym are present in title words
-                if synonym_tokens.issubset(title_words_lower):
+
+                # Check if any tokens from synonym are present in title words
+                if synonym_tokens & title_words_lower:
                     return str(gong_call["id"])
         
         return None

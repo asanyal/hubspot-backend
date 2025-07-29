@@ -339,7 +339,7 @@ async def get_contacts_and_champion(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error identifying contacts and champion: {str(e)}")
 
-@router.get("/get-concerns", response_model=Dict[str, Any])
+@router.get("/get-concerns", response_model=List[Dict[str, Any]])
 async def get_concerns(
     dealName: str = Query(..., description="The name of the deal"),
 ):
@@ -349,52 +349,25 @@ async def get_concerns(
         deal_activity = deal_insights_repo.get_by_deal_id(dealName)
         if not deal_activity:
             print(Fore.YELLOW + f"No deal insights found for: {dealName}" + Style.RESET_ALL)
-            return {
-                "pricing_concerns": "No data",
-                "no_decision_maker": "No data",
-                "already_has_vendor": "No data"
-            }
+            return []
 
-        concerns = deal_activity.get("concerns", {})
+        concerns = deal_activity.get("concerns", [])
         if not concerns:
             print(Fore.YELLOW + f"No concerns data found for: {dealName}" + Style.RESET_ALL)
-            return {
-                "pricing_concerns": "No data",
-                "no_decision_maker": "No data",
-                "already_has_vendor": "No data"
-            }
+            return []
 
-        concerns_list = concerns if isinstance(concerns, list) else [concerns]
+        # Handle both old format (dict) and new format (list)
+        if isinstance(concerns, dict):
+            # Convert old format to list format
+            concerns_list = [concerns]
+        elif isinstance(concerns, list):
+            concerns_list = concerns
+        else:
+            print(Fore.YELLOW + f"Invalid concerns format for: {dealName}" + Style.RESET_ALL)
+            return []
 
-        def process_concern(field_name, bool_key):
-            true_explanations = []
-            false_explanations = []
-            has_true = False
-
-            for c in concerns_list:
-                field = c.get(field_name, {})
-                value = field.get(bool_key)
-                explanation = field.get("explanation", "")
-
-                if value:
-                    has_true = True
-                    true_explanations.append(explanation)
-                elif value is False:
-                    false_explanations.append(explanation)
-
-            if has_true:
-                return {bool_key: True, "explanation": " ".join(true_explanations).strip()}
-            else:
-                return {bool_key: False, "explanation": " ".join(false_explanations).strip()}
-
-        response = {
-            "pricing_concerns": process_concern("pricing_concerns", "has_concerns"),
-            "no_decision_maker": process_concern("no_decision_maker", "is_issue"),
-            "already_has_vendor": process_concern("already_has_vendor", "has_vendor"),
-        }
-
-        print(Fore.GREEN + f"Returning response: {response}" + Style.RESET_ALL)
-        return response
+        print(Fore.GREEN + f"Returning {len(concerns_list)} concerns for deal: {dealName}" + Style.RESET_ALL)
+        return concerns_list
 
     except Exception as e:
         print(Fore.RED + f"Error in get-concerns endpoint: {str(e)}" + Style.RESET_ALL)
@@ -819,7 +792,17 @@ async def aggregate_deal_insights(deal_names: List[str]):
                 concern_deals["using_competitor_no_data"].append(deal_name)
                 continue
 
-            concerns_list = concerns if isinstance(concerns, list) else [concerns]
+            # Handle both old format (dict) and new format (list)
+            if isinstance(concerns, dict):
+                concerns_list = [concerns]
+            elif isinstance(concerns, list):
+                concerns_list = concerns
+            else:
+                # Invalid format → mark as no data
+                concern_deals["pricing_concerns_no_data"].append(deal_name)
+                concern_deals["no_decision_maker_no_data"].append(deal_name)
+                concern_deals["using_competitor_no_data"].append(deal_name)
+                continue
 
             # Track if any data was seen for each concern type
             flags = {
