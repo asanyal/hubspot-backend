@@ -616,10 +616,12 @@ class GongService:
                 # Use the same matching logic as get_call_id
                 company_name_synonyms = company_name.lower().split(",")
                 
-                # Check if any company name token is a substring of any title token
+                # Check if any company name token matches any title word
                 is_match = False
+                title_words = set(call_title.split())
                 for company_synonym in company_name_synonyms:
-                    if company_synonym.strip() in call_title.strip():
+                    synonym_tokens = set(company_synonym.strip().lower().split())
+                    if synonym_tokens & title_words:
                         is_match = True
                         break
 
