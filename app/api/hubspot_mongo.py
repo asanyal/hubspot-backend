@@ -18,6 +18,11 @@ from pydantic import BaseModel
 init()
 
 router = APIRouter()
+
+class SignalsResponse(BaseModel):
+    very_likely_to_buy: int
+    likely_to_buy: int
+    less_likely_to_buy: int
 deal_info_repo = DealInfoRepository()
 deal_insights_repo = DealInsightsRepository()
 deal_timeline_repo = DealTimelineRepository()
@@ -56,6 +61,11 @@ def convert_mongo_doc(doc: Dict) -> Dict:
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "version": "v2"}
+
+@router.get("/test-signals")
+async def test_signals():
+    """Test endpoint for signals"""
+    return {"message": "Signals endpoint is working"}
 
 @router.get("/stages", response_model=List[Dict[str, Any]])
 async def get_pipeline_stages():
@@ -455,6 +465,127 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         traceback.print_exc()
         # Return a graceful response instead of raising an error
         return {"overview": "No company info available"}
+
+@router.get("/get-signals")
+async def get_signals(deal_name: Optional[str] = Query(None, description="The name of the deal")):
+    """Get buyer intent signals from meeting events for a specific deal"""
+    if not deal_name:
+        raise HTTPException(status_code=400, detail="deal_name parameter is required")
+    
+    print(Fore.BLUE + f"#### Getting signals for deal: {deal_name}" + Style.RESET_ALL)
+    
+    try:
+        # Get timeline data for the deal
+        timeline_data = deal_timeline_repo.get_by_deal_id(deal_name)
+        
+        if not timeline_data:
+            print(Fore.YELLOW + f"No timeline data found for deal: {deal_name}" + Style.RESET_ALL)
+            return {
+                "very_likely_to_buy": 0,
+                "likely_to_buy": 0,
+                "less_likely_to_buy": 0
+            }
+        
+        # Initialize signal counters
+        very_likely_to_buy = 0
+        likely_to_buy = 0
+        less_likely_to_buy = 0
+        
+        # Loop through events and count meeting signals
+        events = timeline_data.get('events', [])
+        print(f"Found {len(events)} events for deal {deal_name}")
+        
+        for event in events:
+            event_type = event.get('event_type', '')
+            buyer_intent = event.get('buyer_intent', '')
+            print(f"Event type: {event_type}, Buyer intent: {buyer_intent}")
+            
+            if event_type == 'Meeting':
+                # Map buyer_intent values to signal keys
+                if buyer_intent == 'Very likely to buy':
+                    very_likely_to_buy += 1
+                elif buyer_intent == 'Likely to buy':
+                    likely_to_buy += 1
+                elif buyer_intent == 'Less likely to buy':
+                    less_likely_to_buy += 1
+        
+        result = {
+            "very_likely_to_buy": very_likely_to_buy,
+            "likely_to_buy": likely_to_buy,
+            "less_likely_to_buy": less_likely_to_buy
+        }
+        
+        print(Fore.GREEN + f"Found signals for deal {deal_name}: {result}" + Style.RESET_ALL)
+        return result
+        
+    except Exception as e:
+        print(Fore.RED + f"Error in get-signals endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error fetching signals: {str(e)}")
+
+@router.post("/get-signals-group")
+async def get_signals_group(deal_names: DealNamesRequest):
+    """Get buyer intent signals from meeting events for multiple deals"""
+    print(Fore.BLUE + f"#### Getting signals for {len(deal_names.deal_names)} deals" + Style.RESET_ALL)
+    
+    try:
+        results = {}
+        
+        for deal_name in deal_names.deal_names:
+            print(Fore.BLUE + f"Processing deal: {deal_name}" + Style.RESET_ALL)
+            
+            # Get timeline data for the deal
+            timeline_data = deal_timeline_repo.get_by_deal_id(deal_name)
+            
+            if not timeline_data:
+                print(Fore.YELLOW + f"No timeline data found for deal: {deal_name}" + Style.RESET_ALL)
+                results[deal_name] = {
+                    "very_likely_to_buy": 0,
+                    "likely_to_buy": 0,
+                    "less_likely_to_buy": 0
+                }
+                continue
+            
+            # Initialize signal counters
+            very_likely_to_buy = 0
+            likely_to_buy = 0
+            less_likely_to_buy = 0
+            
+            # Loop through events and count meeting signals
+            events = timeline_data.get('events', [])
+            print(f"Found {len(events)} events for deal {deal_name}")
+            
+            for event in events:
+                event_type = event.get('event_type', '')
+                buyer_intent = event.get('buyer_intent', '')
+                
+                if event_type == 'Meeting':
+                    # Map buyer_intent values to signal keys
+                    if buyer_intent == 'Very likely to buy':
+                        very_likely_to_buy += 1
+                    elif buyer_intent == 'Likely to buy':
+                        likely_to_buy += 1
+                    elif buyer_intent == 'Less likely to buy':
+                        less_likely_to_buy += 1
+            
+            result = {
+                "very_likely_to_buy": very_likely_to_buy,
+                "likely_to_buy": likely_to_buy,
+                "less_likely_to_buy": less_likely_to_buy
+            }
+            
+            results[deal_name] = result
+            print(Fore.GREEN + f"Found signals for deal {deal_name}: {result}" + Style.RESET_ALL)
+        
+        print(Fore.GREEN + f"Completed processing {len(results)} deals" + Style.RESET_ALL)
+        return results
+        
+    except Exception as e:
+        print(Fore.RED + f"Error in get-signals-group endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error fetching signals group: {str(e)}")
 
 def run_sync_job(job_id: str, deal: Optional[str], stage: Optional[str], epoch0: Optional[str]):
     """Background function to run sync operations"""
