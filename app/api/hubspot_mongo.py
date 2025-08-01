@@ -607,15 +607,16 @@ async def get_stakeholders(deal_name: str = Query(..., description="The name of 
         for meeting in meeting_insights:
             buyer_attendees = meeting.get('buyer_attendees', [])
             for attendee in buyer_attendees:
-                # Create a unique key based on name and email to avoid duplicates
+                # Create a unique key based on email to avoid duplicates
                 name = attendee.get('name', '')
                 email = attendee.get('email', '')
                 title = attendee.get('title', '')
                 
-                # Create unique identifier
+                # Create unique identifier using email as primary key
                 if email:
-                    unique_key = f"{name}|{email}"
+                    unique_key = email
                 else:
+                    # Fallback to name if no email available
                     unique_key = name
                 
                 if unique_key not in stakeholders_set:
