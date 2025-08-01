@@ -587,6 +587,106 @@ async def get_signals_group(deal_names: DealNamesRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching signals group: {str(e)}")
 
+@router.get("/get-stakeholders")
+async def get_stakeholders(deal_name: str = Query(..., description="The name of the deal")):
+    """Get all stakeholders for a deal with decision maker analysis"""
+    print(Fore.BLUE + f"#### Getting stakeholders for deal: {deal_name}" + Style.RESET_ALL)
+    
+    try:
+        # Get all meeting insights for the deal
+        meeting_insights = meeting_insights_repo.get_by_deal_id(deal_name)
+        
+        if not meeting_insights:
+            print(Fore.YELLOW + f"No meeting insights found for deal: {deal_name}" + Style.RESET_ALL)
+            return {"stakeholders": []}
+        
+        # Collect unique stakeholders using a set
+        stakeholders_set = set()
+        stakeholders_dict = {}
+        
+        for meeting in meeting_insights:
+            buyer_attendees = meeting.get('buyer_attendees', [])
+            for attendee in buyer_attendees:
+                # Create a unique key based on name and email to avoid duplicates
+                name = attendee.get('name', '')
+                email = attendee.get('email', '')
+                title = attendee.get('title', '')
+                
+                # Create unique identifier
+                if email:
+                    unique_key = f"{name}|{email}"
+                else:
+                    unique_key = name
+                
+                if unique_key not in stakeholders_set:
+                    stakeholders_set.add(unique_key)
+                    stakeholders_dict[unique_key] = {
+                        "name": name,
+                        "email": email,
+                        "title": title
+                    }
+        
+        print(Fore.GREEN + f"Found {len(stakeholders_dict)} unique stakeholders for deal {deal_name}" + Style.RESET_ALL)
+        
+        # Analyze each stakeholder for decision maker potential
+        from app.services.llm_service import ask_openai
+        
+        stakeholders_with_analysis = []
+        for unique_key, stakeholder in stakeholders_dict.items():
+            title = stakeholder.get('title', '')
+            
+            potential_decision_maker = False
+            if title:
+                decision_maker_prompt = f"""
+                Analyze if this person is likely to be a decision maker based on their job title.
+                
+                Job Title: {title}
+                
+                Decision makers are typically:
+                - High-level individual contributors (Principal Engineer, Staff Engineer, Architect, etc.)
+                - Management roles (Director, VP, Senior VP, C-suite, Founder, etc.)
+                - People with significant influence over purchasing decisions
+                
+                Non-decision makers are typically:
+                - Regular software engineers, developers, analysts
+                - Junior or mid-level positions without purchasing authority
+                
+                Respond with only "Yes" or "No".
+                """
+                
+                try:
+                    response = ask_openai(
+                        user_content=decision_maker_prompt,
+                        system_content="You are a sales analyst that determines decision-making authority based on job titles. Respond only with 'Yes' or 'No'."
+                    )
+                    
+                    response = response.strip().lower()
+                    potential_decision_maker = response in ['yes', 'true', '1']
+                    
+                except Exception as e:
+                    print(Fore.RED + f"Error analyzing decision maker for title '{title}': {str(e)}" + Style.RESET_ALL)
+                    potential_decision_maker = False
+            
+            stakeholder_with_analysis = {
+                "name": stakeholder["name"],
+                "email": stakeholder["email"],
+                "title": stakeholder["title"],
+                "potential_decision_maker": potential_decision_maker
+            }
+            
+            stakeholders_with_analysis.append(stakeholder_with_analysis)
+        
+        stakeholders_with_analysis.sort(key=lambda x: (-x['potential_decision_maker'], x['name'].lower()))
+        
+        print(Fore.GREEN + f"Completed stakeholder analysis for deal {deal_name}. Found {len(stakeholders_with_analysis)} stakeholders." + Style.RESET_ALL)
+        return {"stakeholders": stakeholders_with_analysis}
+        
+    except Exception as e:
+        print(Fore.RED + f"Error in get-stakeholders endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error fetching stakeholders: {str(e)}")
+
 def run_sync_job(job_id: str, deal: Optional[str], stage: Optional[str], epoch0: Optional[str]):
     """Background function to run sync operations"""
     try:
