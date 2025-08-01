@@ -688,6 +688,223 @@ async def get_stakeholders(deal_name: str = Query(..., description="The name of 
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching stakeholders: {str(e)}")
 
+@router.get("/deal-risk-score")
+async def get_deal_risk_score(deal_name: str = Query(..., description="The name of the deal")):
+    """Get risk score and analysis for a specific deal"""
+    print(Fore.BLUE + f"#### Getting risk score for deal: {deal_name}" + Style.RESET_ALL)
+    
+    try:
+        risk_factors = {}
+        total_risk_score = 0
+        data_sources = {}
+        
+        # 1. Get Deal Insights (concerns)
+        deal_insights = deal_insights_repo.get_by_deal_id(deal_name)
+        data_sources["deal_insights"] = deal_insights
+        
+        # 2. Get Deal Timeline
+        timeline_data = deal_timeline_repo.get_by_deal_id(deal_name)
+        data_sources["timeline_events"] = timeline_data
+        
+        # 3. Get Meeting Insights
+        meeting_insights = meeting_insights_repo.get_by_deal_id(deal_name)
+        data_sources["meeting_insights"] = meeting_insights
+        
+        # 4. Get Stakeholders
+        stakeholders_response = await get_stakeholders(deal_name)
+        stakeholders = stakeholders_response.get("stakeholders", [])
+        data_sources["stakeholders"] = stakeholders
+        
+        # Calculate Risk Factors
+        
+        # Factor 1: No Decision Maker (0-25 points)
+        no_decision_maker_score = 0
+        no_decision_maker_details = []
+        
+        # Check deal insights first
+        if deal_insights and deal_insights.get("concerns"):
+            concerns = deal_insights.get("concerns")
+            # Handle both old format (dict) and new format (list)
+            if isinstance(concerns, dict):
+                concerns_list = [concerns]
+            elif isinstance(concerns, list):
+                concerns_list = concerns
+            else:
+                concerns_list = []
+            
+            for concern in concerns_list:
+                if isinstance(concern, dict) and concern.get("no_decision_maker", {}).get("is_issue", False):
+                    no_decision_maker_score += 15
+                    no_decision_maker_details.append("Deal insights indicate no decision maker identified")
+                    break
+        
+        # Analyze stakeholders
+        decision_makers = [s for s in stakeholders if s.get("potential_decision_maker", False)]
+        if len(decision_makers) == 0:
+            no_decision_maker_score += 10
+            no_decision_maker_details.append("No decision makers found among stakeholders")
+        else:
+            no_decision_maker_details.append(f"Decision makers identified: {len(decision_makers)}")
+        
+        risk_factors["no_decision_maker"] = {
+            "risk_score": no_decision_maker_score,
+            "details": no_decision_maker_details,
+            "max_score": 25
+        }
+        total_risk_score += no_decision_maker_score
+        
+        # Factor 2: Pricing Concerns (0-20 points)
+        pricing_concerns_score = 0
+        pricing_concerns_details = []
+        
+        if deal_insights and deal_insights.get("concerns"):
+            concerns = deal_insights.get("concerns")
+            if isinstance(concerns, dict):
+                concerns_list = [concerns]
+            elif isinstance(concerns, list):
+                concerns_list = concerns
+            else:
+                concerns_list = []
+            
+            # Count pricing concerns
+            pricing_concern_count = 0
+            for concern in concerns_list:
+                if isinstance(concern, dict) and concern.get("pricing_concerns", {}).get("has_concerns", False):
+                    pricing_concern_count += 1
+            
+            if pricing_concern_count >= 2:
+                pricing_concerns_score = 20
+                pricing_concerns_details.append(f"High risk: {pricing_concern_count} pricing concerns identified")
+            elif pricing_concern_count == 1:
+                pricing_concerns_score = 10
+                pricing_concerns_details.append("Medium risk: 1 pricing concern identified")
+            else:
+                pricing_concerns_details.append("No pricing concerns detected")
+        
+        risk_factors["pricing_concerns"] = {
+            "risk_score": pricing_concerns_score,
+            "details": pricing_concerns_details,
+            "max_score": 20
+        }
+        total_risk_score += pricing_concerns_score
+        
+        # Factor 3: Competitor Presence (0-20 points)
+        competitor_score = 0
+        competitor_details = []
+        
+        if deal_insights and deal_insights.get("concerns"):
+            concerns = deal_insights.get("concerns")
+            if isinstance(concerns, dict):
+                concerns_list = [concerns]
+            elif isinstance(concerns, list):
+                concerns_list = concerns
+            else:
+                concerns_list = []
+            
+            # Count competitor mentions
+            competitor_mention_count = 0
+            for concern in concerns_list:
+                if isinstance(concern, dict) and concern.get("already_has_vendor", {}).get("has_vendor", False):
+                    competitor_mention_count += 1
+            
+            if competitor_mention_count >= 1:
+                competitor_score = 10
+                competitor_details.append(f"Medium risk: {competitor_mention_count} competitor mentions")
+            else:
+                competitor_details.append("No competitor presence detected")
+        
+        risk_factors["competitor_presence"] = {
+            "risk_score": competitor_score,
+            "details": competitor_details,
+            "max_score": 20
+        }
+        total_risk_score += competitor_score
+        
+        # Factor 4: Sentiment Trends (0-10 points)
+        sentiment_score = 0
+        sentiment_details = []
+        
+        if timeline_data and timeline_data.get("events"):
+            events = timeline_data.get("events", [])
+            recent_events = [e for e in events if e.get("sentiment") and e.get("sentiment") != "Unknown"]
+            
+            if recent_events:
+                # Get last 5 events with sentiment
+                recent_sentiments = [e.get("sentiment") for e in recent_events[-5:]]
+                negative_count = sum(1 for s in recent_sentiments if s == "negative")
+                
+                if negative_count >= 3:
+                    sentiment_score = 10
+                    sentiment_details.append("Multiple negative sentiments in recent events")
+                elif negative_count >= 1:
+                    sentiment_score = 5
+                    sentiment_details.append("Some negative sentiments detected")
+                else:
+                    sentiment_details.append("Generally positive sentiment trends")
+        
+        risk_factors["sentiment_trends"] = {
+            "risk_score": sentiment_score,
+            "details": sentiment_details,
+            "max_score": 10
+        }
+        total_risk_score += sentiment_score
+        
+        # Ensure total score doesn't exceed 100
+        total_risk_score = min(total_risk_score, 100)
+        
+        # Determine risk level based on individual factors
+        # Count factors by risk level
+        low_risk_factors = 0
+        medium_risk_factors = 0
+        high_risk_factors = 0
+        max_risk_factors = 0
+        
+        for factor_name, factor_data in risk_factors.items():
+            factor_score = factor_data.get("risk_score", 0)
+            max_score = factor_data.get("max_score", 0)
+            
+            # Calculate percentage of max score
+            if max_score > 0:
+                percentage = (factor_score / max_score) * 100
+                
+                if percentage == 0:
+                    low_risk_factors += 1
+                elif percentage <= 50:
+                    medium_risk_factors += 1
+                elif percentage <= 80:
+                    high_risk_factors += 1
+                else:
+                    max_risk_factors += 1
+        
+        # Determine overall risk level based on 4 factors
+        if max_risk_factors >= 3:  # 3/4 factors are max scores
+            risk_level = "Maximum"
+        elif low_risk_factors >= 3 and max_risk_factors == 0:  # At least 3/4 factors are 0 scores, and no max scores
+            risk_level = "Low"
+        elif high_risk_factors >= 2:  # 2/4 factors are high risk
+            risk_level = "High"
+        elif high_risk_factors >= 1 and (high_risk_factors + medium_risk_factors) >= 4:  # 1 high + 3 medium
+            risk_level = "High"
+        else:
+            risk_level = "Medium"
+        
+        response = {
+            "risk_score": total_risk_score,
+            "risk_level": risk_level,
+            "risk_factors": risk_factors,
+            "last_calculated": datetime.now().isoformat(),
+            "deal_name": deal_name
+        }
+        
+        print(Fore.GREEN + f"Risk score for {deal_name}: {total_risk_score}/100 ({risk_level})" + Style.RESET_ALL)
+        return response
+        
+    except Exception as e:
+        print(Fore.RED + f"Error in deal-risk-score endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error calculating risk score: {str(e)}")
+
 def run_sync_job(job_id: str, deal: Optional[str], stage: Optional[str], epoch0: Optional[str]):
     """Background function to run sync operations"""
     try:
