@@ -19,9 +19,11 @@ def get_company_analysis(deal_name: str) -> str:
         url = ask_openai(
             system_content=f"You are a smart financial analyst",
             user_content=f"""
-                What's the full website URL of the company associated with the company: "{company_name}". 
-                Only return the main URL (home page) of the company. Skip any subdomains.
-                If you cannot return a URL, return "None"
+                What is the full website URL associated with the company name: "{company_name}".
+                INSTRUCTIONS:
+                - Ignore suffixes after a hyphen, like "New Deal", "New Opp" etc.
+                - Only return the main URL (home page) of the company. Skip any subdomains.
+                - If you cannot return a URL, return "None"
             """
         )
         if url == "None":
