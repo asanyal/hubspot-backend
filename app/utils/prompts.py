@@ -43,8 +43,8 @@ company_name_prompt = """
     Title: {call_title}
 
     INSTRUCTIONS:
-    1. The returned list should be comma separated.
-    2. If the title contains " - New Deal", extract everything before it
+    1. The list should be comma separated.
+    2. If the title contains " - New Deal" or "Renewal", extract everything before it
     3. Exclude suffixes like "inc", "llc", "holdings", "technologies", "corp", "company", "corporation" etc. from the company name
     4. For a healthcare company, EXCLUDE "health" or "healthcare" from the company name
     5. Return multiple possible variants of the company name, if applicable, such as abbreviations or common short forms (separated by spaces)
@@ -62,6 +62,8 @@ company_name_prompt = """
     - "Deutsche Telekom" -> "Deutsche Telekom, DT"
     - "FreshWorks" -> "FreshWorks, FW"
     - "Bank of America" -> "Bank of America, BofA"
+    - "Proctor & Gamble" -> "Proctor & Gamble, P&G", "PGE"
+    - Jack Henry & Associates -> "Jack Henry & Associates, JH, JHA"
 
     For companies with multiple words, include the abbreviation of the first word in the output.
     - "Deutsche Bank" -> "Deutsche Bank, DB"

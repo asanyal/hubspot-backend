@@ -688,6 +688,100 @@ async def get_stakeholders(deal_name: str = Query(..., description="The name of 
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching stakeholders: {str(e)}")
 
+@router.get("/get-latest-meetings", response_model=List[Dict[str, Any]])
+async def get_latest_meetings(days: int = Query(2, description="Number of days to look back for meetings")):
+    """Get all meetings from any deal that occurred from the start of N days ago to now"""
+    print(Fore.BLUE + f"#### Getting latest meetings from the past {days} days" + Style.RESET_ALL)
+    
+    try:
+        # Calculate the cutoff time (start of N days ago at 12am)
+        now = datetime.now()
+        cutoff_time = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        print(Fore.YELLOW + f"Current time: {now.isoformat()}" + Style.RESET_ALL)
+        print(Fore.YELLOW + f"Cutoff time (start of day): {cutoff_time.isoformat()}" + Style.RESET_ALL)
+        
+        # Get all timeline documents
+        all_timelines = deal_timeline_repo.find_many({})
+        
+        meetings = []
+        total_meetings_checked = 0
+        
+        for timeline in all_timelines:
+            deal_id = timeline.get('deal_id')
+            events = timeline.get('events', [])
+            
+            for event in events:
+                # Check if this is a meeting event
+                if event.get('event_type') == 'Meeting':
+                    total_meetings_checked += 1
+                    event_date = event.get('event_date')
+                    
+                    print(Fore.CYAN + f"Processing meeting: {event.get('subject', 'No subject')} - Raw event_date: {event_date} (type: {type(event_date)})" + Style.RESET_ALL)
+                    
+                    # Handle different date formats
+                    if isinstance(event_date, str):
+                        try:
+                            # Try to parse as ISO format first
+                            event_date = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+                        except (ValueError, TypeError):
+                            try:
+                                # Try to parse as datetime string
+                                event_date = datetime.strptime(event_date, "%Y-%m-%d %H:%M")
+                            except (ValueError, TypeError):
+                                print(Fore.RED + f"Could not parse date string: {event_date}" + Style.RESET_ALL)
+                                continue
+                    elif not isinstance(event_date, datetime):
+                        print(Fore.RED + f"Invalid event_date type: {type(event_date)}, value: {event_date}" + Style.RESET_ALL)
+                        continue
+                    
+                    # Convert event_date to naive datetime if it has timezone info
+                    if event_date.tzinfo is not None:
+                        event_date = event_date.replace(tzinfo=None)
+                    
+                    print(Fore.CYAN + f"Parsed event_date: {event_date.isoformat()}" + Style.RESET_ALL)
+                    print(Fore.CYAN + f"Cutoff (start of day): {cutoff_time.isoformat()}, Now: {now.isoformat()}" + Style.RESET_ALL)
+                    
+                    # Debug the comparison
+                    is_after_cutoff = event_date >= cutoff_time
+                    is_before_now = event_date <= now
+                    within_range = is_after_cutoff and is_before_now
+                    
+                    print(Fore.CYAN + f"Event >= cutoff: {is_after_cutoff}, Event <= now: {is_before_now}, Within range: {within_range}" + Style.RESET_ALL)
+                    
+                    # Check if event is within the time window (event_date should be <= now and >= cutoff_time)
+                    if within_range:
+                        # Filter out meetings with "Unknown" sentiment
+                        sentiment = event.get('sentiment', '')
+                        if sentiment.lower() == 'unknown':
+                            print(Fore.YELLOW + f"✗ Skipped meeting (unknown sentiment): {event.get('subject', 'No subject')}" + Style.RESET_ALL)
+                            continue
+                        
+                        meeting = {
+                            "deal_id": deal_id,
+                            "event_date": event_date.isoformat(),
+                            "subject": event.get('subject', ''),
+                            "sentiment": sentiment,
+                            "buyer_intent": event.get('buyer_intent', ''),
+                            "event_id": event.get('event_id', '')
+                        }
+                        meetings.append(meeting)
+                        print(Fore.GREEN + f"✓ Added meeting: {meeting['subject']}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + f"✗ Skipped meeting (outside range): {event.get('subject', 'No subject')}" + Style.RESET_ALL)
+        
+        # Sort by event_date in descending order (most recent first)
+        meetings.sort(key=lambda x: x['event_date'], reverse=True)
+        
+        print(Fore.GREEN + f"Found {len(meetings)} meetings in the past {days} days out of {total_meetings_checked} total meetings checked" + Style.RESET_ALL)
+        return meetings
+        
+    except Exception as e:
+        print(Fore.RED + f"Error in get-latest-meetings endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error fetching latest meetings: {str(e)}")
+
 @router.get("/deal-risk-score")
 async def get_deal_risk_score(deal_name: str = Query(..., description="The name of the deal")):
     """Get risk score and analysis for a specific deal"""

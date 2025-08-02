@@ -21,8 +21,67 @@ from app.utils.prompts import champion_prompt, parr_principle_prompt, buyer_inte
 from app.utils.general_utils import extract_company_name
 
 import uuid
+import re
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+
+# Download required NLTK data (run once)
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords')
 
 init()
+
+def filter_filler_words(text: str) -> set:
+    """
+    Filter out filler words, special characters, and noisy words from text.
+    Returns a set of meaningful words.
+    """
+    if not text:
+        return set()
+    
+    # Remove special characters and convert to lowercase
+    text = re.sub(r'[^\w\s]', ' ', text.lower())
+    
+    # Tokenize the text
+    tokens = word_tokenize(text)
+    
+    # Get English stopwords
+    stop_words = set(stopwords.words('english'))
+    
+    # Add custom noisy words
+    custom_noise = {
+        'and', 'or', '&', 'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by',
+        'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+        'will', 'would', 'could', 'should', 'may', 'might', 'can', 'must', 'shall',
+        'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they',
+        'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'her', 'its', 'our', 'their',
+        'mine', 'yours', 'hers', 'ours', 'theirs', 'myself', 'yourself', 'himself', 'herself',
+        'itself', 'ourselves', 'yourselves', 'themselves',
+        'call', 'meeting', 'demo', 'discussion', 'talk', 'chat', 'conversation',
+        'zoom', 'teams', 'webex', 'google', 'meet', 'video', 'audio', 'phone',
+        'schedule', 'scheduled', 'calendar', 'invite', 'invitation', 'join',
+        'gong', 'recording', 'transcript', 'session', 'webinar', 'presentation',
+        'ai'
+    }
+    
+    # Combine stopwords with custom noise
+    all_noise = stop_words.union(custom_noise)
+    
+    # Filter out noise words and short words (less than 2 characters)
+    meaningful_words = {
+        token for token in tokens 
+        if token not in all_noise and len(token) >= 2
+    }
+    
+    return meaningful_words
 
 @dataclass
 class Speaker:
@@ -137,16 +196,18 @@ class GongService:
 
         for gong_call in calls_from_gong:
             
-            title_words = set(gong_call.get("title", "").split())
+            title = gong_call.get("title", "")
+            # Filter out filler words from title
+            title_words = filter_filler_words(title)
             print(f"-- Matching call title words: {title_words} with company synonyms: {company_synonyms}")
+            
             for synonym in company_synonyms:
                 synonym = synonym.strip()
-                # Split synonym into tokens and convert to lowercase
-                synonym_tokens = set(synonym.lower().split())
-                title_words_lower = set(word.lower() for word in title_words)
+                # Filter out filler words from synonym
+                synonym_tokens = filter_filler_words(synonym)
 
-                # Check if any tokens from synonym are present in title words
-                if synonym_tokens & title_words_lower:
+                # Check if any meaningful tokens from synonym are present in title words
+                if synonym_tokens & title_words:
                     return str(gong_call["id"])
         
         return None
@@ -429,12 +490,13 @@ class GongService:
             matching_calls = []
             matches = 0
             for call in calls:
-                title = call.get("title", "").lower()
+                title = call.get("title", "")
 
-                company_name_tokens = company_name.lower().split(" ")
-                title_tokens = title.lower().split(" ")
+                # Filter out filler words from company name and title
+                company_name_tokens = filter_filler_words(company_name)
+                title_tokens = filter_filler_words(title)
 
-                if any(token in title_tokens for token in company_name_tokens):
+                if company_name_tokens & title_tokens:
                     matching_calls.append(call)
                     matches += 1
 
@@ -614,13 +676,13 @@ class GongService:
                     continue
                     
                 # Use the same matching logic as get_call_id
-                company_name_synonyms = company_name.lower().split(",")
+                company_name_synonyms = company_name.split(",")
                 
                 # Check if any company name token matches any title word
                 is_match = False
-                title_words = set(call_title.split())
+                title_words = filter_filler_words(call_title)
                 for company_synonym in company_name_synonyms:
-                    synonym_tokens = set(company_synonym.strip().lower().split())
+                    synonym_tokens = filter_filler_words(company_synonym.strip())
                     if synonym_tokens & title_words:
                         is_match = True
                         break
