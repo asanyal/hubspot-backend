@@ -717,8 +717,6 @@ async def get_latest_meetings(days: int = Query(2, description="Number of days t
                     total_meetings_checked += 1
                     event_date = event.get('event_date')
                     
-                    print(Fore.CYAN + f"Processing meeting: {event.get('subject', 'No subject')} - Raw event_date: {event_date} (type: {type(event_date)})" + Style.RESET_ALL)
-                    
                     # Handle different date formats
                     if isinstance(event_date, str):
                         try:
@@ -738,16 +736,10 @@ async def get_latest_meetings(days: int = Query(2, description="Number of days t
                     # Convert event_date to naive datetime if it has timezone info
                     if event_date.tzinfo is not None:
                         event_date = event_date.replace(tzinfo=None)
-                    
-                    print(Fore.CYAN + f"Parsed event_date: {event_date.isoformat()}" + Style.RESET_ALL)
-                    print(Fore.CYAN + f"Cutoff (start of day): {cutoff_time.isoformat()}, Now: {now.isoformat()}" + Style.RESET_ALL)
-                    
                     # Debug the comparison
                     is_after_cutoff = event_date >= cutoff_time
                     is_before_now = event_date <= now
                     within_range = is_after_cutoff and is_before_now
-                    
-                    print(Fore.CYAN + f"Event >= cutoff: {is_after_cutoff}, Event <= now: {is_before_now}, Within range: {within_range}" + Style.RESET_ALL)
                     
                     # Check if event is within the time window (event_date should be <= now and >= cutoff_time)
                     if within_range:
@@ -766,10 +758,8 @@ async def get_latest_meetings(days: int = Query(2, description="Number of days t
                             "event_id": event.get('event_id', '')
                         }
                         meetings.append(meeting)
-                        print(Fore.GREEN + f"✓ Added meeting: {meeting['subject']}" + Style.RESET_ALL)
-                    else:
-                        print(Fore.YELLOW + f"✗ Skipped meeting (outside range): {event.get('subject', 'No subject')}" + Style.RESET_ALL)
-        
+                        print(Fore.GREEN + f"✓ Added meeting: {meeting['subject']}" + Style.RESET_ALL) 
+                               
         # Sort by event_date in descending order (most recent first)
         meetings.sort(key=lambda x: x['event_date'], reverse=True)
         

@@ -565,26 +565,11 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         get_company_overview.cache = {}
     
     try:
-        # Create a cache key based on the deal name
-        cache_key = f"company_overview_{dealName}"
-        print(Fore.BLUE + f"Cache key: {cache_key}" + Style.RESET_ALL)
-        
-        # Check if we have cached data for this deal
-        if cache_key in get_company_overview.cache:
-            cached_overview = get_company_overview.cache[cache_key]
-            print(Fore.GREEN + f"[CACHE HIT] Returning cached company overview for deal: {dealName}" + Style.RESET_ALL)
-            return {"overview": cached_overview}
-            
-        # No cache hit, call the company analysis function
-        print(Fore.YELLOW + f"[CACHE MISS] Generating new company overview for deal: {dealName}" + Style.RESET_ALL)
         try:
             print(Fore.BLUE + "Calling get_company_analysis..." + Style.RESET_ALL)
             company_info = get_company_analysis(dealName)
             print(Fore.GREEN + f"Successfully got company info: {company_info[:100]}..." + Style.RESET_ALL)
             
-            # Cache the result
-            get_company_overview.cache[cache_key] = company_info
-            print(Fore.GREEN + f"[CACHE UPDATE] Saved company overview to cache for deal: {dealName}" + Style.RESET_ALL)
             return {"overview": company_info}
         except Exception as scrape_error:
             # Log the error but return a graceful response
