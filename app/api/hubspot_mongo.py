@@ -359,12 +359,40 @@ async def get_concerns(
         deal_activity = deal_insights_repo.get_by_deal_id(dealName)
         if not deal_activity:
             print(Fore.YELLOW + f"No deal insights found for: {dealName}" + Style.RESET_ALL)
-            return []
+            # Return structured response with "N/A" values
+            return [{
+                "pricing_concerns": {
+                    "has_concerns": "N/A",
+                    "explanation": ""
+                },
+                "no_decision_maker": {
+                    "is_issue": "N/A",
+                    "explanation": ""
+                },
+                "already_has_vendor": {
+                    "has_vendor": "N/A",
+                    "explanation": ""
+                }
+            }]
 
         concerns = deal_activity.get("concerns", [])
         if not concerns:
             print(Fore.YELLOW + f"No concerns data found for: {dealName}" + Style.RESET_ALL)
-            return []
+            # Return structured response with "N/A" values
+            return [{
+                "pricing_concerns": {
+                    "has_concerns": "N/A",
+                    "explanation": ""
+                },
+                "no_decision_maker": {
+                    "is_issue": "N/A",
+                    "explanation": ""
+                },
+                "already_has_vendor": {
+                    "has_vendor": "N/A",
+                    "explanation": ""
+                }
+            }]
 
         # Handle both old format (dict) and new format (list)
         if isinstance(concerns, dict):
@@ -374,7 +402,21 @@ async def get_concerns(
             concerns_list = concerns
         else:
             print(Fore.YELLOW + f"Invalid concerns format for: {dealName}" + Style.RESET_ALL)
-            return []
+            # Return structured response with "N/A" values
+            return [{
+                "pricing_concerns": {
+                    "has_concerns": "N/A",
+                    "explanation": ""
+                },
+                "no_decision_maker": {
+                    "is_issue": "N/A",
+                    "explanation": ""
+                },
+                "already_has_vendor": {
+                    "has_vendor": "N/A",
+                    "explanation": ""
+                }
+            }]
 
         print(Fore.GREEN + f"Returning {len(concerns_list)} concerns for deal: {dealName}" + Style.RESET_ALL)
         return concerns_list
