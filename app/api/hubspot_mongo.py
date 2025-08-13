@@ -14,6 +14,7 @@ from colorama import Fore, Style, init
 import threading
 import queue
 from pydantic import BaseModel
+from app.services.llm_service import ask_openai
 
 init()
 
@@ -492,21 +493,73 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
     print(Fore.BLUE + f"#### Getting company overview for deal: {dealName}" + Style.RESET_ALL)
     
     try:
-        # Get company overview from MongoDB
-        overview_data = company_overview_repo.get_by_deal_id(dealName)
+        # Get meeting insights from MongoDB
+        meeting_insights = meeting_insights_repo.get_by_deal_id(dealName)
         
-        if not overview_data:
-            print(Fore.YELLOW + f"No company overview found for deal: {dealName}" + Style.RESET_ALL)
-            return {"overview": "No company info available"}
-            
-        return {"overview": overview_data.get('overview', 'No company info available')}
+        if not meeting_insights:
+            print(Fore.YELLOW + f"No meeting insights found for deal: {dealName}" + Style.RESET_ALL)
+            return {"overview": "-"}
+        
+        # Sort meeting insights by date with latest first
+        def get_meeting_date(meeting):
+            meeting_date = meeting.get('meeting_date')
+            if isinstance(meeting_date, str):
+                try:
+                    return datetime.strptime(meeting_date, "%Y-%m-%d")
+                except ValueError:
+                    return datetime.min
+            elif isinstance(meeting_date, datetime):
+                return meeting_date
+            else:
+                return datetime.min
+        
+        # Sort by meeting_date in descending order (latest first)
+        meeting_insights.sort(key=get_meeting_date, reverse=True)
+        
+        print(Fore.BLUE + f"Found {len(meeting_insights)} meetings for deal: {dealName}" + Style.RESET_ALL)
+        
+        limited_meetings = meeting_insights[:6]
+        print(Fore.BLUE + f"Processing first {len(limited_meetings)} most recent meetings for deal: {dealName}" + Style.RESET_ALL)
+        
+        all_transcripts = []
+        for meeting in limited_meetings:
+            transcript = meeting.get('transcript', '')
+            if transcript and transcript.strip():
+                all_transcripts.append(transcript.strip())
+        
+        if not all_transcripts:
+            print(Fore.YELLOW + f"No transcripts found for deal: {dealName}" + Style.RESET_ALL)
+            return {"overview": "-"}
+        
+        # Concatenate and cap at 10000 characters
+        combined_transcript = " ".join(all_transcripts)
+        if len(combined_transcript) > 10000:
+            combined_transcript = combined_transcript[:10000]
+        
+        print(Fore.GREEN + f"Combined transcript length: {len(combined_transcript)} characters for deal: {dealName}" + Style.RESET_ALL)
+        
+        summary_prompt = f"""
+        Please summarize the following transcript - conversation between the buyer and seller - in 2-3 lines. 
+        The seller is always Galileo. The product being sold is Galileo.
+        Focus on the key points in the transcript, any decisions made, any positive or negative signals (less likely to buy, likely to buy). Use gerund phrases. Only return the summary, no other text.
+
+        Transcript:
+        {combined_transcript}
+        """
+        
+        summary = ask_openai(
+            user_content=summary_prompt,
+            system_content="You are a sales analyst that creates concise, informative summaries of meeting transcripts. Focus on key business insights and decisions."
+        )
+        
+        return {"overview": summary}
         
     except Exception as e:
         print(Fore.RED + f"Error in company-overview endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         # Return a graceful response instead of raising an error
-        return {"overview": "No company info available"}
+        return {"overview": "Error generating summary from meeting transcripts"}
 
 @router.get("/get-signals")
 async def get_signals(deal_name: Optional[str] = Query(None, description="The name of the deal")):
@@ -672,7 +725,7 @@ async def get_stakeholders(deal_name: str = Query(..., description="The name of 
         print(Fore.GREEN + f"Found {len(stakeholders_dict)} unique stakeholders for deal {deal_name}" + Style.RESET_ALL)
         
         # Analyze each stakeholder for decision maker potential
-        from app.services.llm_service import ask_openai
+        
         
         stakeholders_with_analysis = []
         for unique_key, stakeholder in stakeholders_dict.items():
