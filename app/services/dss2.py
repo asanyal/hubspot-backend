@@ -11,6 +11,7 @@ from app.utils.general_utils import extract_company_name
 from app.services.hubspot_service import HubspotService
 from colorama import Fore, Style
 import time
+from app.repositories.deal_owner_performance_repository import DealOwnerPerformanceRepository
 
 class DataSyncService2:
 
@@ -21,6 +22,7 @@ class DataSyncService2:
         self.deal_insights_repo = DealInsightsRepository()
         self.deal_timeline_repo = DealTimelineRepository()
         self.meeting_insights_repo = MeetingInsightsRepository()
+        self.deal_owner_performance_repo = DealOwnerPerformanceRepository()
 
     def sync_stage_on_date(self, stage_name: str, date_str: str) -> None:
         """Sync all deals in a specific stage for a single date"""
@@ -83,6 +85,10 @@ class DataSyncService2:
             # 4. Sync meeting insights
             print('## Syncing meeting_insights')
             self._sync_meeting_insights(deal_name, date_str)
+
+            # 5. Sync deal owner performance
+            print('## Syncing deal_owner_performance')
+            self.sync_deal_owner_performance()
             
             print(Fore.GREEN + f"Successfully synced deal {deal_name} for date {date_str}" + Style.RESET_ALL)
             
@@ -123,6 +129,7 @@ class DataSyncService2:
                 self._sync_deal_insights(deal_name, date_str)
                 self._sync_timeline_events(deal_name, date_str)
                 self._sync_meeting_insights(deal_name, date_str)
+                self.sync_deal_owner_performance()
                 elapsed = time.time() - t
                 print(Fore.GREEN + f"Done syncing deal {deal_name} for date {date_str}.\nTook {elapsed:.2f} seconds" + Style.RESET_ALL)
 
@@ -151,6 +158,52 @@ class DataSyncService2:
                 except Exception as e:
                     print(Fore.RED + f"Error processing deal {deal_name}: {str(e)}" + Style.RESET_ALL)
                     continue
+
+    def sync_deal_owner_performance(self) -> None:
+        """Sync deal owner performance data to MongoDB"""
+        print(Fore.MAGENTA + "Syncing deal owner performance data" + Style.RESET_ALL)
+
+        # Step 1: Get all deals
+        all_deals = self.deal_info_repo.get_all_deals()
+        print(Fore.GREEN + f"Found {len(all_deals)} deals" + Style.RESET_ALL)
+
+        # Step 2: Group deals by owner
+        owner_deals_map = {}
+        for deal in all_deals:
+            owner = deal.get('owner')
+            if owner is None or owner == {}:
+                owner = "Unknown Owner"
+            if owner not in owner_deals_map:
+                owner_deals_map[owner] = []
+            owner_deals_map[owner].append(deal.get('deal_name'))
+
+        # Step 4: Calculate performance for each owner
+        for owner, deals in owner_deals_map.items():
+            print(Fore.GREEN + f"Syncing numbers for {owner}" + Style.RESET_ALL)
+            performance = {"positive": 0, "negative": 0, "neutral": 0}
+
+            for deal_name in deals:
+                # Step 5: Get timeline data for each deal
+                timeline_data = self.deal_timeline_repo.get_by_deal_id(deal_name)
+                if not timeline_data:
+                    continue
+
+                # Step 6: Count sentiments, ignoring 'Outgoing Email' events
+                for event in timeline_data.get('events', []):
+                    if event.get('event_type') == 'Outgoing Email' or event.get('sentiment', 'Unknown').lower() not in ('positive', 'negative', 'neutral'):
+                        continue
+                    sentiment = event.get('sentiment', 'Unknown').lower()
+                    if sentiment in performance:
+                        performance[sentiment] += 1
+
+            print(Fore.MAGENTA + f"Performance for {owner}: {performance}" + Style.RESET_ALL)
+
+            print(Fore.RED + f"Deleting owner performance for {owner}" + Style.RESET_ALL)
+            self.deal_owner_performance_repo.delete_owner_performance(owner)
+            print(Fore.RED + f"Inserting owner performance for {owner}" + Style.RESET_ALL)
+            self.deal_owner_performance_repo.insert_owner_performance(owner, performance)
+
+        print(Fore.GREEN + "Successfully synced deal owner performance data" + Style.RESET_ALL)
 
     def _sync_deal_info(self, deal_name: str) -> None:
         """Sync deal info if it doesn't exist in MongoDB"""

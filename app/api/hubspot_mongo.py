@@ -10,6 +10,7 @@ from app.repositories.meeting_insights_repository import MeetingInsightsReposito
 from app.repositories.company_overview_repository import CompanyOverviewRepository
 from app.services.data_sync_service import DataSyncService
 from app.services.dss2 import DataSyncService2
+from app.repositories.deal_owner_performance_repository import DealOwnerPerformanceRepository
 from colorama import Fore, Style, init
 import threading
 import queue
@@ -31,6 +32,7 @@ meeting_insights_repo = MeetingInsightsRepository()
 company_overview_repo = CompanyOverviewRepository()
 sync_service = DataSyncService()
 sync_service_v2 = DataSyncService2()
+deal_owner_performance_repo = DealOwnerPerformanceRepository()
 
 # Store for tracking sync jobs
 sync_jobs = {}
@@ -1937,3 +1939,38 @@ async def sync_all_stages_yesterday(background_tasks: BackgroundTasks):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}") 
+
+@router.get("/deal-owner-performance", response_model=Dict[str, Any])
+async def get_deal_owner_performance(deal_owner: str = Query(..., description="The name of the deal owner")):
+    """Get deal owner performance data from MongoDB"""
+    print(Fore.BLUE + f"#### Getting performance data for deal owner: {deal_owner}" + Style.RESET_ALL)
+    try:
+        # Fetch the performance data for the specified deal owner
+        performance_data = deal_owner_performance_repo.find_one({"owner": deal_owner})
+
+        if not performance_data:
+            raise HTTPException(status_code=404, detail=f"Performance data not found for deal owner: {deal_owner}")
+
+        # Convert MongoDB document to JSON-serializable format
+        performance_data = convert_mongo_doc(performance_data)
+
+        return performance_data
+    except Exception as e:
+        print(Fore.RED + f"Error fetching deal owner performance data: {str(e)}" + Style.RESET_ALL)
+        raise HTTPException(status_code=500, detail=f"Error fetching performance data: {str(e)}")
+
+@router.post("/sync-deal-owner-performance", status_code=202)
+async def sync_deal_owner_performance_endpoint(background_tasks: BackgroundTasks):
+    """Invoke the sync of deal owner performance data"""
+    print(Fore.BLUE + "#### Invoking sync for deal owner performance data" + Style.RESET_ALL)
+    try:
+        # Run the sync operation in the background
+        background_tasks.add_task(sync_service_v2.sync_deal_owner_performance)
+
+        return {
+            "status": "accepted",
+            "message": "Sync job for deal owner performance started"
+        }
+    except Exception as e:
+        print(Fore.RED + f"Error invoking sync for deal owner performance: {str(e)}" + Style.RESET_ALL)
+        raise HTTPException(status_code=500, detail=f"Error invoking sync: {str(e)}")

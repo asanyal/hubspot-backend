@@ -2,6 +2,8 @@ import certifi
 from pymongo import MongoClient
 from app.core.config import settings
 import os
+from colorama import Fore, Style, init
+init()
 
 class MongoConnection:
     _client = None
@@ -16,6 +18,7 @@ class MongoConnection:
                 "tlsCAFile": certifi.where()
             }
 
+            print(Fore.YELLOW + f"Connecting to MongoDB: {settings.MONGO_URI}" + Style.RESET_ALL)
             cls._client = MongoClient(settings.MONGO_URI, **tls_args)
 
         return cls._client
