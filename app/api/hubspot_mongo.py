@@ -16,6 +16,7 @@ import threading
 import queue
 from pydantic import BaseModel
 from app.services.llm_service import ask_openai
+from collections import defaultdict
 
 init()
 
@@ -2032,3 +2033,132 @@ async def sync_deal_owner_performance_endpoint(background_tasks: BackgroundTasks
     except Exception as e:
         print(Fore.RED + f"Error invoking sync for deal owner performance: {str(e)}" + Style.RESET_ALL)
         raise HTTPException(status_code=500, detail=f"Error invoking sync: {str(e)}")
+
+from collections import defaultdict
+
+@router.get("/health-scores")
+async def get_deal_owner_performance_health_buckets(
+    start_date: str = Query(..., description="Start date in format '1 Jan 2025'"),
+    end_date: str = Query(..., description="End date in format '1 Jan 2025'")
+):
+    try:
+        # Parse and validate dates
+        def parse_date(date_str):
+            try:
+                return datetime.strptime(date_str, "%d %b %Y")
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid date format: {date_str}. Expected format: '1 Jan 2025'")
+        
+        original_start_dt = parse_date(start_date)
+        original_end_dt = parse_date(end_date)
+        
+        if original_start_dt >= original_end_dt:
+            raise HTTPException(status_code=400, detail="Start date must be before end date")
+        
+        # Adjust start date to Monday before (or same day if already Monday)
+        def adjust_to_monday(date):
+            weekday = date.weekday()  # Monday = 0, Sunday = 6
+            return date - timedelta(days=weekday)
+        
+        # Adjust end date to Friday of that week
+        def adjust_to_friday(date):
+            weekday = date.weekday()  # Monday = 0, Sunday = 6
+            return date + timedelta(days=4 - weekday)  # Always go to Friday of that week
+        
+        start_dt = adjust_to_monday(original_start_dt)
+        end_dt = adjust_to_friday(original_end_dt)
+        
+        print(Fore.CYAN + f"Adjusted dates: {original_start_dt.strftime('%d %b %Y')} -> {start_dt.strftime('%d %b %Y')}, "
+              f"{original_end_dt.strftime('%d %b %Y')} -> {end_dt.strftime('%d %b %Y')}" + Style.RESET_ALL)
+        
+        # Calculate number of complete weeks
+        total_days = (end_dt - start_dt).days + 1
+        num_weeks = total_days // 7
+        
+        print(Fore.YELLOW + f"Total days: {total_days}, Number of weeks: {num_weeks}" + Style.RESET_ALL)
+        
+        # Get all deal owner performance data
+        all_performance_data = deal_owner_performance_repo.find_many({})
+        
+        if not all_performance_data:
+            return {"buckets": []}
+        
+        # Use defaultdict for automatic initialization
+        week_signals = defaultdict(lambda: defaultdict(int))
+        
+        # Signal type mappings
+        positive_signals = {"likely to buy", "very likely to buy"}
+        negative_signals = {"less likely to buy"}
+        neutral_signals = {"neutral"}
+        
+        # Process all signals and group by week
+        for performance_doc in all_performance_data:
+            deals_performance = performance_doc.get("deals_performance", {})
+            
+            for signal_type, signal_data in deals_performance.items():
+                if signal_type not in (positive_signals | negative_signals | neutral_signals):
+                    continue
+                    
+                deals = signal_data.get("deals", [])
+                
+                for deal in deals:
+                    signal_dates = deal.get("signal_dates", [])
+                    
+                    for date_str in signal_dates:
+                        try:
+                            signal_date = datetime.strptime(date_str, "%d %b %Y")
+                            
+                            # Skip weekends
+                            if signal_date.weekday() >= 5:
+                                continue
+                            
+                            # Calculate which week this date falls into
+                            days_from_start = (signal_date - start_dt).days
+                            if 0 <= days_from_start < total_days:
+                                week_index = days_from_start // 7
+                                if week_index < num_weeks + 1:
+                                    if signal_type in positive_signals:
+                                        week_signals[week_index]["positive"] += 1
+                                    elif signal_type in negative_signals:
+                                        week_signals[week_index]["negative"] += 1
+                                    elif signal_type in neutral_signals:
+                                        week_signals[week_index]["neutral"] += 1
+                                        
+                        except ValueError as e:
+                            print(Fore.RED + f"Could not parse signal date: {date_str}, error: {str(e)}" + Style.RESET_ALL)
+                            continue
+        
+        # Build final weekly buckets
+        buckets = []
+        for i in range(num_weeks + 1):
+            week_start = start_dt + timedelta(days=i * 7)  # Monday
+            week_end = week_start + timedelta(days=4)      # Friday
+            
+            positive_signals_count = week_signals[i]["positive"]
+            neutral_signals_count = week_signals[i]["neutral"]
+            negative_signals_count = week_signals[i]["negative"]
+            
+            # Calculate ratio
+            if neutral_signals_count > 0:
+                ratio = round(positive_signals_count / neutral_signals_count, 3)
+            else:
+                ratio = -1
+            
+            buckets.append({
+                "bucket_start": week_start.strftime("%d %b %Y"),
+                "bucket_end": week_end.strftime("%d %b %Y"),
+                "business_days": 5,  # Always 5 business days (Mon-Fri)
+                "positive_signals": positive_signals_count,
+                "neutral_signals": neutral_signals_count,
+                "negative_signals": negative_signals_count,
+                "ratio": ratio
+            })
+        
+        print(Fore.GREEN + f"Generated {len(buckets)} weekly buckets with health scores" + Style.RESET_ALL)
+        return {"buckets": buckets}
+        
+    except Exception as e:
+        print(Fore.RED + f"Error in deal-owner-performance-health-buckets endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error calculating health scores: {str(e)}")
