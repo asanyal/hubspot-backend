@@ -60,6 +60,38 @@ def convert_mongo_doc(doc: Dict) -> Dict:
     
     return doc
 
+def sort_signal_dates_in_performance_data(performance_data: Dict) -> Dict:
+    """Sort signal dates by recency (most recent first) in deal owner performance data"""
+    
+    def parse_date_for_sorting(date_str):
+        try:
+            return datetime.strptime(date_str, '%d %b %Y')
+        except ValueError:
+            # If parsing fails, return a very old date so it goes to the end
+            return datetime(1900, 1, 1)
+    
+    # Check if this is a single owner's data or multiple owners
+    if 'deals_performance' in performance_data:
+        # Single owner data
+        deals_performance = performance_data['deals_performance']
+        for sentiment, sentiment_data in deals_performance.items():
+            if 'deals' in sentiment_data:
+                for deal in sentiment_data['deals']:
+                    if isinstance(deal, dict) and 'signal_dates' in deal:
+                        deal['signal_dates'] = sorted(deal['signal_dates'], key=parse_date_for_sorting, reverse=True)
+    elif 'owners' in performance_data:
+        # Multiple owners data
+        for owner_data in performance_data['owners']:
+            if 'deals_performance' in owner_data:
+                deals_performance = owner_data['deals_performance']
+                for sentiment, sentiment_data in deals_performance.items():
+                    if 'deals' in sentiment_data:
+                        for deal in sentiment_data['deals']:
+                            if isinstance(deal, dict) and 'signal_dates' in deal:
+                                deal['signal_dates'] = sorted(deal['signal_dates'], key=parse_date_for_sorting, reverse=True)
+    
+    return performance_data
+
 @router.get("/health", status_code=200)
 async def health_check():
     """Health check endpoint"""
@@ -1954,6 +1986,9 @@ async def get_deal_owner_performance(deal_owner: Optional[str] = Query(None, des
 
             # Convert MongoDB document to JSON-serializable format
             performance_data = convert_mongo_doc(performance_data)
+            
+            # Sort signal dates by recency (most recent first)
+            performance_data = sort_signal_dates_in_performance_data(performance_data)
 
             return performance_data
         except Exception as e:
@@ -1973,7 +2008,11 @@ async def get_deal_owner_performance(deal_owner: Optional[str] = Query(None, des
             for data in all_performance_data:
                 formatted_data.append(convert_mongo_doc(data))
 
-            return {"owners": formatted_data}
+            # Sort signal dates by recency (most recent first)
+            result = {"owners": formatted_data}
+            result = sort_signal_dates_in_performance_data(result)
+
+            return result
         except Exception as e:
             print(Fore.RED + f"Error fetching all deal owner performance data: {str(e)}" + Style.RESET_ALL)
             raise HTTPException(status_code=500, detail=f"Error fetching performance data: {str(e)}")

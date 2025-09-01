@@ -24,6 +24,22 @@ class DataSyncService2:
         self.meeting_insights_repo = MeetingInsightsRepository()
         self.deal_owner_performance_repo = DealOwnerPerformanceRepository()
 
+    def _format_signal_date(self, event_date) -> str:
+        """Convert event date to format like '31 Mar 2025'"""
+        if isinstance(event_date, datetime):
+            dt = event_date
+        elif isinstance(event_date, str):
+            try:
+                # Parse ISO format date
+                dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+            except (ValueError, TypeError):
+                return ""
+        else:
+            return ""
+        
+        # Format as "DD MMM YYYY"
+        return dt.strftime('%d %b %Y').lstrip('0')  # Remove leading zero from day
+
     def sync_stage_on_date(self, stage_name: str, date_str: str) -> None:
         """Sync all deals in a specific stage for a single date"""
         print(Fore.MAGENTA + f"Syncing data for stage: {stage_name}, date: {date_str}" + Style.RESET_ALL)
@@ -85,10 +101,6 @@ class DataSyncService2:
             # 4. Sync meeting insights
             print('## Syncing meeting_insights')
             self._sync_meeting_insights(deal_name, date_str)
-
-            # 5. Sync deal owner performance
-            print('## Syncing deal_owner_performance')
-            self.sync_deal_owner_performance()
             
             print(Fore.GREEN + f"Successfully synced deal {deal_name} for date {date_str}" + Style.RESET_ALL)
             
@@ -182,44 +194,65 @@ class DataSyncService2:
             print(Fore.GREEN + f"Syncing numbers for {owner}" + Style.RESET_ALL)
 
             performance = {
-                "likely to buy": {"count": 0, "deals": set()},
-                "very likely to buy": {"count": 0, "deals": set()},
-                "less likely to buy": {"count": 0, "deals": set()},
-                "neutral": {"count": 0, "deals": set()}
+                "likely to buy": {"count": 0, "deals": {}},
+                "very likely to buy": {"count": 0, "deals": {}},
+                "less likely to buy": {"count": 0, "deals": {}},
+                "neutral": {"count": 0, "deals": {}}
             }
 
             for deal_name in deals:
-                # Step 5: Get timeline data for each deal
                 timeline_data = self.deal_timeline_repo.get_by_deal_id(deal_name)
                 if not timeline_data:
                     continue
 
-                # Track which sentiments this deal has contributed to
-                deal_sentiments = set()
+                deal_sentiment_dates = {}
 
-                # Step 6: Count sentiments, include only Meetings
                 for event in timeline_data.get('events', []):
                     if event.get('event_type') != 'Meeting':
                         continue
                     
-                    print(f"Event type: {event.get('event_type')}. Sentiment: {event.get('buyer_intent')}")
                     buyer_intent = str(event.get('buyer_intent', 'Unknown')).lower()
                     if buyer_intent not in ('very likely to buy', 'likely to buy', 'less likely to buy', 'neutral'):
                         continue
                     
-                    performance[buyer_intent]["count"] += 1
-                    deal_sentiments.add(buyer_intent)
+                    # Get the event date and format it
+                    event_date = event.get('event_date')
+                    formatted_date = self._format_signal_date(event_date)
+                    
+                    if formatted_date:
+                        if buyer_intent not in deal_sentiment_dates:
+                            deal_sentiment_dates[buyer_intent] = set()
+                        deal_sentiment_dates[buyer_intent].add(formatted_date)
+                        performance[buyer_intent]["count"] += 1
 
-                # Add deal to the sets for sentiments it contributed to
-                for buyer_intent in deal_sentiments:
-                    performance[buyer_intent]["deals"].add(deal_name)
+                # Add deal to the deals dict for sentiments it contributed to
+                for buyer_intent, dates in deal_sentiment_dates.items():
+                    if deal_name not in performance[buyer_intent]["deals"]:
+                        performance[buyer_intent]["deals"][deal_name] = set()
+                    performance[buyer_intent]["deals"][deal_name].update(dates)
 
             # Convert sets to lists for JSON serialization
             formatted_performance = {}
             for sentiment, data in performance.items():
+                deals_list = []
+                for deal_name, signal_dates in data["deals"].items():
+                    # Sort dates by recency (most recent first)
+                    def parse_date_for_sorting(date_str):
+                        try:
+                            return datetime.strptime(date_str, '%d %b %Y')
+                        except ValueError:
+                            # If parsing fails, return a very old date so it goes to the end
+                            return datetime(1900, 1, 1)
+                    
+                    sorted_dates = sorted(list(signal_dates), key=parse_date_for_sorting, reverse=True)
+                    deals_list.append({
+                        "deal_name": deal_name,
+                        "signal_dates": sorted_dates
+                    })
+                
                 formatted_performance[sentiment] = {
                     "count": data["count"],
-                    "deals": list(data["deals"])
+                    "deals": deals_list
                 }
 
             print(Fore.MAGENTA + f"Performance for {owner}: {formatted_performance}" + Style.RESET_ALL)
