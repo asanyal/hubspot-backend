@@ -1941,23 +1941,42 @@ async def sync_all_stages_yesterday(background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}") 
 
 @router.get("/deal-owner-performance", response_model=Dict[str, Any])
-async def get_deal_owner_performance(deal_owner: str = Query(..., description="The name of the deal owner")):
+async def get_deal_owner_performance(deal_owner: Optional[str] = Query(None, description="The name of the deal owner (optional)")):
     """Get deal owner performance data from MongoDB"""
-    print(Fore.BLUE + f"#### Getting performance data for deal owner: {deal_owner}" + Style.RESET_ALL)
-    try:
-        # Fetch the performance data for the specified deal owner
-        performance_data = deal_owner_performance_repo.find_one({"owner": deal_owner})
+    if deal_owner:
+        print(Fore.BLUE + f"#### Getting performance data for deal owner: {deal_owner}" + Style.RESET_ALL)
+        try:
+            # Fetch the performance data for the specified deal owner
+            performance_data = deal_owner_performance_repo.find_one({"owner": deal_owner})
 
-        if not performance_data:
-            raise HTTPException(status_code=404, detail=f"Performance data not found for deal owner: {deal_owner}")
+            if not performance_data:
+                raise HTTPException(status_code=404, detail=f"Performance data not found for deal owner: {deal_owner}")
 
-        # Convert MongoDB document to JSON-serializable format
-        performance_data = convert_mongo_doc(performance_data)
+            # Convert MongoDB document to JSON-serializable format
+            performance_data = convert_mongo_doc(performance_data)
 
-        return performance_data
-    except Exception as e:
-        print(Fore.RED + f"Error fetching deal owner performance data: {str(e)}" + Style.RESET_ALL)
-        raise HTTPException(status_code=500, detail=f"Error fetching performance data: {str(e)}")
+            return performance_data
+        except Exception as e:
+            print(Fore.RED + f"Error fetching deal owner performance data: {str(e)}" + Style.RESET_ALL)
+            raise HTTPException(status_code=500, detail=f"Error fetching performance data: {str(e)}")
+    else:
+        print(Fore.BLUE + "#### Getting performance data for all deal owners" + Style.RESET_ALL)
+        try:
+            # Fetch all deal owner performance data
+            all_performance_data = deal_owner_performance_repo.find_many({})
+
+            if not all_performance_data:
+                return {"owners": []}
+
+            # Convert MongoDB documents to JSON-serializable format
+            formatted_data = []
+            for data in all_performance_data:
+                formatted_data.append(convert_mongo_doc(data))
+
+            return {"owners": formatted_data}
+        except Exception as e:
+            print(Fore.RED + f"Error fetching all deal owner performance data: {str(e)}" + Style.RESET_ALL)
+            raise HTTPException(status_code=500, detail=f"Error fetching performance data: {str(e)}")
 
 @router.post("/sync-deal-owner-performance", status_code=202)
 async def sync_deal_owner_performance_endpoint(background_tasks: BackgroundTasks):

@@ -180,7 +180,13 @@ class DataSyncService2:
         # Step 4: Calculate performance for each owner
         for owner, deals in owner_deals_map.items():
             print(Fore.GREEN + f"Syncing numbers for {owner}" + Style.RESET_ALL)
-            performance = {"positive": 0, "negative": 0, "neutral": 0}
+
+            performance = {
+                "likely to buy": {"count": 0, "deals": set()},
+                "very likely to buy": {"count": 0, "deals": set()},
+                "less likely to buy": {"count": 0, "deals": set()},
+                "neutral": {"count": 0, "deals": set()}
+            }
 
             for deal_name in deals:
                 # Step 5: Get timeline data for each deal
@@ -188,20 +194,40 @@ class DataSyncService2:
                 if not timeline_data:
                     continue
 
-                # Step 6: Count sentiments, ignoring 'Outgoing Email' events
-                for event in timeline_data.get('events', []):
-                    if event.get('event_type') == 'Outgoing Email' or event.get('sentiment', 'Unknown').lower() not in ('positive', 'negative', 'neutral'):
-                        continue
-                    sentiment = event.get('sentiment', 'Unknown').lower()
-                    if sentiment in performance:
-                        performance[sentiment] += 1
+                # Track which sentiments this deal has contributed to
+                deal_sentiments = set()
 
-            print(Fore.MAGENTA + f"Performance for {owner}: {performance}" + Style.RESET_ALL)
+                # Step 6: Count sentiments, include only Meetings
+                for event in timeline_data.get('events', []):
+                    if event.get('event_type') != 'Meeting':
+                        continue
+                    
+                    print(f"Event type: {event.get('event_type')}. Sentiment: {event.get('buyer_intent')}")
+                    buyer_intent = str(event.get('buyer_intent', 'Unknown')).lower()
+                    if buyer_intent not in ('very likely to buy', 'likely to buy', 'less likely to buy', 'neutral'):
+                        continue
+                    
+                    performance[buyer_intent]["count"] += 1
+                    deal_sentiments.add(buyer_intent)
+
+                # Add deal to the sets for sentiments it contributed to
+                for buyer_intent in deal_sentiments:
+                    performance[buyer_intent]["deals"].add(deal_name)
+
+            # Convert sets to lists for JSON serialization
+            formatted_performance = {}
+            for sentiment, data in performance.items():
+                formatted_performance[sentiment] = {
+                    "count": data["count"],
+                    "deals": list(data["deals"])
+                }
+
+            print(Fore.MAGENTA + f"Performance for {owner}: {formatted_performance}" + Style.RESET_ALL)
 
             print(Fore.RED + f"Deleting owner performance for {owner}" + Style.RESET_ALL)
             self.deal_owner_performance_repo.delete_owner_performance(owner)
             print(Fore.RED + f"Inserting owner performance for {owner}" + Style.RESET_ALL)
-            self.deal_owner_performance_repo.insert_owner_performance(owner, performance)
+            self.deal_owner_performance_repo.insert_owner_performance(owner, formatted_performance)
 
         print(Fore.GREEN + "Successfully synced deal owner performance data" + Style.RESET_ALL)
 
