@@ -2034,13 +2034,12 @@ async def sync_deal_owner_performance_endpoint(background_tasks: BackgroundTasks
         print(Fore.RED + f"Error invoking sync for deal owner performance: {str(e)}" + Style.RESET_ALL)
         raise HTTPException(status_code=500, detail=f"Error invoking sync: {str(e)}")
 
-from collections import defaultdict
-
-@router.get("/health-scores")
+@router.get("/health-scores", status_code=200)
 async def get_deal_owner_performance_health_buckets(
     start_date: str = Query(..., description="Start date in format '1 Jan 2025'"),
     end_date: str = Query(..., description="End date in format '1 Jan 2025'")
 ):
+    print(Fore.BLUE + f"#### Getting health scores for date range: {start_date} to {end_date}" + Style.RESET_ALL)
     try:
         # Parse and validate dates
         def parse_date(date_str):
