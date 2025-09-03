@@ -2037,9 +2037,12 @@ async def sync_deal_owner_performance_endpoint(background_tasks: BackgroundTasks
 @router.get("/health-scores", status_code=200)
 async def get_deal_owner_performance_health_buckets(
     start_date: str = Query(..., description="Start date in format '1 Jan 2025'"),
-    end_date: str = Query(..., description="End date in format '1 Jan 2025'")
+    end_date: str = Query(..., description="End date in format '1 Jan 2025'"),
+    stage_names: Optional[List[str]] = Query(None, description="Optional list of stage names to filter deals by")
 ):
     print(Fore.BLUE + f"#### Getting health scores for date range: {start_date} to {end_date}" + Style.RESET_ALL)
+    if stage_names:
+        print(Fore.BLUE + f"Filtering by stages: {stage_names}" + Style.RESET_ALL)
     try:
         # Parse and validate dates
         def parse_date(date_str):
@@ -2082,13 +2085,77 @@ async def get_deal_owner_performance_health_buckets(
         if not all_performance_data:
             return {"buckets": []}
         
-        # Use defaultdict for automatic initialization
-        week_signals = defaultdict(lambda: defaultdict(int))
-        
-        # Signal type mappings
+        # Signal type mappings - define these before filtering logic
         positive_signals = {"likely to buy", "very likely to buy"}
         negative_signals = {"less likely to buy"}
         neutral_signals = {"neutral"}
+        
+        # If stage_names is provided, filter deals to only include those from selected stages
+        if stage_names:
+            print(Fore.BLUE + f"Filtering deals by stages: {stage_names}" + Style.RESET_ALL)
+            
+            # Get all deals with their stages to create a mapping
+            all_deals = deal_info_repo.get_all_deals()
+
+            deal_stage_mapping = {}
+
+            for deal in all_deals:
+                deal_name = deal.get('deal_name')
+                stage = deal.get('stage')
+                if deal_name and stage:
+                    deal_stage_mapping[deal_name] = stage
+            
+            print(Fore.BLUE + f"Found {len(deal_stage_mapping)} deals with stage information" + Style.RESET_ALL)
+            
+            # Filter performance data to only include deals from selected stages
+
+            print(Fore.BLUE + f"Filtering for stage names: {stage_names}" + Style.RESET_ALL)
+
+            filtered_performance_data = []
+            for performance_doc in all_performance_data:
+                deals_performance = performance_doc.get("deals_performance", {})
+                filtered_deals_performance = {}
+                
+                for signal_type, signal_data in deals_performance.items():
+                    if signal_type not in (positive_signals | negative_signals | neutral_signals):
+                        continue
+                    
+                    deals = signal_data.get("deals", [])
+                    filtered_deals = []
+                    
+                    for deal in deals:
+                        deal_name = deal.get("deal_name")
+                        if deal_name and deal_name in deal_stage_mapping:
+                            deal_stage = deal_stage_mapping[deal_name]
+                            if deal_stage in stage_names:
+                                filtered_deals.append(deal)
+                    
+                    if filtered_deals:  # Only include signal types that have filtered deals
+                        filtered_deals_performance[signal_type] = {
+                            **signal_data,
+                            "deals": filtered_deals
+                        }
+                
+                if filtered_deals_performance:
+                    filtered_performance_data.append({
+                        **performance_doc,
+                        "deals_performance": filtered_deals_performance
+                    })
+            
+            all_performance_data = filtered_performance_data
+            print(Fore.BLUE + f"Filtered to {len(all_performance_data)} performance documents" + Style.RESET_ALL)
+            
+            # Count total deals after filtering
+            total_filtered_deals = 0
+            for doc in all_performance_data:
+                deals_performance = doc.get("deals_performance", {})
+                for signal_type, signal_data in deals_performance.items():
+                    deals = signal_data.get("deals", [])
+                    total_filtered_deals += len(deals)
+            print(Fore.BLUE + f"Total deals after stage filtering: {total_filtered_deals}" + Style.RESET_ALL)
+        
+        # Use defaultdict for automatic initialization
+        week_signals = defaultdict(lambda: defaultdict(int))
         
         # Process all signals and group by week
         for performance_doc in all_performance_data:

@@ -69,7 +69,7 @@ def filter_filler_words(text: str) -> set:
         'zoom', 'teams', 'webex', 'google', 'meet', 'video', 'audio', 'phone',
         'schedule', 'scheduled', 'calendar', 'invite', 'invitation', 'join',
         'gong', 'recording', 'transcript', 'session', 'webinar', 'presentation',
-        'ai', 'land', 'platform', 'monitor', 'observe'
+        'ai', 'land', 'platform', 'monitor', 'observe', 'group'
     }
     
     # Combine stopwords with custom noise
