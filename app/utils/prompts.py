@@ -200,10 +200,9 @@ Only consider specific behaviors like pricing discussions, implementation intere
 - Confirming budget alignment or deployment interest
 
 **Examples of Disinterest or Blockers ("Less Likely to Buy")**
-- Expressing confusion about Galileo’s value or overlap
-- Highlighting technical or organizational blockers
-- Stalling or deflecting next steps
-- Stating they are not decision-makers or not ready
+- Expressing confusion about Galileo's value
+- Highlighting technical blockers: facing product issues, deployment issues, integration issues
+- Seeing poor results from Galileo (inaccurate metrics, bugs, error, missing features etc.)
 
 ---
 
