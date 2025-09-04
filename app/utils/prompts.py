@@ -182,7 +182,7 @@ parr_principle_prompt = """
 buyer_intent_prompt = """
 Analyze the following sales call transcript between the Galileo team and a potential buyer.
 
-Your task is to evaluate the **buyer's purchasing intent**, based only on explicit, action-oriented verbal evidence in the transcript. Ignore tone, politeness, or general enthusiasm.
+Your task is to evaluate the **buyer's intent**, based only on explicit, action-oriented verbal evidence in the transcript. Ignore tone, politeness, or general enthusiasm.
 
 Additionally, identify and summarize any **buyer use cases**, **pain points**, or **goals** related to why they are exploring a Generative AI Evaluation/Observability solution like Galileo. This includes what they are trying to build, measure, improve, or solve — especially related to agent workflows, RAG pipelines, LLM quality, or internal AI initiatives.
 
