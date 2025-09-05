@@ -8,13 +8,14 @@ app = FastAPI(title="HubSpot CRM API")
 
 allow_origins=[
     "https://hubspot-gong-db-atin4.replit.app",
+    "https://midnight-snack-a7x9bq.replit.app",
     "http://localhost:3000"
 ]
 
 # Configure CORS - moved to top and updated configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins,
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
