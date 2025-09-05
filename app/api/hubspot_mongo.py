@@ -43,6 +43,11 @@ active_threads = {}
 class DealNamesRequest(BaseModel):
     deal_names: List[str]
 
+class HealthScoresRequest(BaseModel):
+    start_date: str
+    end_date: str
+    stage_names: Optional[List[str]] = None
+
 def convert_mongo_doc(doc: Dict) -> Dict:
     """Convert MongoDB document to JSON-serializable format"""
     if doc is None:
@@ -2006,12 +2011,43 @@ async def sync_deal_owner_performance_endpoint(background_tasks: BackgroundTasks
         print(Fore.RED + f"Error invoking sync for deal owner performance: {str(e)}" + Style.RESET_ALL)
         raise HTTPException(status_code=500, detail=f"Error invoking sync: {str(e)}")
 
+@router.post("/health-scores", status_code=200)
+async def get_deal_owner_performance_health_buckets_post(request: HealthScoresRequest):
+    """
+    Get deal owner performance health buckets with proper request body handling.
+    This is the preferred endpoint for complex queries with stage filtering.
+    
+    Example request body:
+    {
+        "start_date": "1 Jul 2025",
+        "end_date": "1 Sep 2025",
+        "stage_names": ["0. Identification", "Closed Lost"]
+    }
+    """
+    return await _get_health_scores_internal(request.start_date, request.end_date, request.stage_names)
+
 @router.get("/health-scores", status_code=200)
-async def get_deal_owner_performance_health_buckets(
+async def get_deal_owner_performance_health_buckets_get(
     start_date: str = Query(..., description="Start date in format '1 Jan 2025'"),
     end_date: str = Query(..., description="End date in format '1 Jan 2025'"),
-    stage_names: Optional[List[str]] = Query(None, description="Optional list of stage names to filter deals by")
+    stage_names: Optional[str] = Query(None, description="Optional comma-separated stage names to filter deals by")
 ):
+    """
+    Get deal owner performance health buckets (GET version for simple queries).
+    For complex stage filtering, use the POST endpoint instead.
+    
+    Example: /health-scores?start_date=1%20Jul%202025&end_date=1%20Sep%202025&stage_names=0.%20Identification,Closed%20Lost
+    """
+    # Parse comma-separated stage names if provided
+    parsed_stage_names = None
+    if stage_names:
+        parsed_stage_names = [name.strip() for name in stage_names.split(',') if name.strip()]
+        print(Fore.BLUE + f"Parsed comma-separated stage_names: {parsed_stage_names}" + Style.RESET_ALL)
+    
+    return await _get_health_scores_internal(start_date, end_date, parsed_stage_names)
+
+async def _get_health_scores_internal(start_date: str, end_date: str, stage_names: Optional[List[str]]):
+    """Internal function to handle health scores logic for both GET and POST endpoints"""
     print(Fore.BLUE + f"#### Getting health scores for date range: {start_date} to {end_date}" + Style.RESET_ALL)
     if stage_names:
         print(Fore.BLUE + f"Filtering by stages: {stage_names}" + Style.RESET_ALL)
@@ -2062,6 +2098,20 @@ async def get_deal_owner_performance_health_buckets(
         if stage_names:
             print(Fore.BLUE + f"Building deal-stage mapping for filtering by stages: {stage_names}" + Style.RESET_ALL)
             
+            # First, let's see what stages exist in the database
+            all_stages_pipeline = [
+                {"$match": {"stage": {"$exists": True, "$ne": None}}},
+                {"$group": {"_id": "$stage", "count": {"$sum": 1}}},
+                {"$sort": {"count": -1}}
+            ]
+            
+            all_stages_cursor = deal_info_repo.collection.aggregate(all_stages_pipeline)
+            available_stages = []
+            for stage_doc in all_stages_cursor:
+                available_stages.append(stage_doc["_id"])
+            
+            print(Fore.CYAN + f"Available stages in database: {available_stages[:10]}" + Style.RESET_ALL)  # Show first 10
+            
             # Use projection to only fetch deal_name and stage fields
             pipeline = [
                 {"$match": {"deal_name": {"$exists": True, "$ne": None}, "stage": {"$exists": True, "$ne": None}}},
@@ -2069,16 +2119,35 @@ async def get_deal_owner_performance_health_buckets(
             ]
             
             deals_cursor = deal_info_repo.collection.aggregate(pipeline)
+            total_deals_checked = 0
+            matched_deals = 0
+            
             for deal in deals_cursor:
+                total_deals_checked += 1
                 deal_name = deal.get('deal_name')
                 stage = deal.get('stage')
-                if deal_name and stage and stage in stage_names:
-                    deal_stage_mapping[deal_name] = stage
+                
+                if deal_name and stage:
+                    # Check for exact match first, then case-insensitive match
+                    stage_match = False
+                    for target_stage in stage_names:
+                        if stage == target_stage or stage.lower().strip() == target_stage.lower().strip():
+                            deal_stage_mapping[deal_name] = stage
+                            matched_deals += 1
+                            stage_match = True
+                            break
+                    
+                    # Debug first few non-matches
+                    if not stage_match and len(deal_stage_mapping) < 5:
+                        print(Fore.YELLOW + f"No match for deal '{deal_name}' with stage '{stage}'" + Style.RESET_ALL)
             
-            print(Fore.BLUE + f"Found {len(deal_stage_mapping)} deals in target stages" + Style.RESET_ALL)
+            print(Fore.BLUE + f"Checked {total_deals_checked} deals, found {matched_deals} deals in target stages" + Style.RESET_ALL)
+            print(Fore.BLUE + f"Deal-stage mapping size: {len(deal_stage_mapping)}" + Style.RESET_ALL)
             
             if not deal_stage_mapping:
                 print(Fore.YELLOW + "No deals found in specified stages, returning empty buckets" + Style.RESET_ALL)
+                print(Fore.YELLOW + f"Target stages: {stage_names}" + Style.RESET_ALL)
+                print(Fore.YELLOW + f"Sample available stages: {available_stages[:5]}" + Style.RESET_ALL)
                 return {"buckets": []}
         
         # Use defaultdict for automatic initialization
@@ -2097,6 +2166,9 @@ async def get_deal_owner_performance_health_buckets(
         
         # Process performance data in streaming fashion
         processed_docs = 0
+        performance_deals_found = set()
+        filtered_deals_processed = 0
+        
         for performance_doc in performance_cursor:
             processed_docs += 1
             deals_performance = performance_doc.get("deals_performance", {})
@@ -2109,10 +2181,16 @@ async def get_deal_owner_performance_health_buckets(
                 
                 for deal in deals:
                     deal_name = deal.get("deal_name")
+                    performance_deals_found.add(deal_name)
                     
                     # Apply stage filtering early to skip unnecessary processing
                     if stage_names and deal_name not in deal_stage_mapping:
+                        # Debug: show first few mismatches
+                        if filtered_deals_processed < 3:
+                            print(Fore.YELLOW + f"Performance deal '{deal_name}' not in stage mapping" + Style.RESET_ALL)
                         continue
+                    
+                    filtered_deals_processed += 1
                     
                     signal_dates = deal.get("signal_dates", [])
                     
@@ -2142,6 +2220,17 @@ async def get_deal_owner_performance_health_buckets(
                             continue
         
         print(Fore.GREEN + f"Processed {processed_docs} performance documents" + Style.RESET_ALL)
+        print(Fore.GREEN + f"Found {len(performance_deals_found)} unique deals in performance data" + Style.RESET_ALL)
+        print(Fore.GREEN + f"Processed {filtered_deals_processed} deals after stage filtering" + Style.RESET_ALL)
+        
+        # Debug: show overlap between performance deals and stage mapping
+        if stage_names and deal_stage_mapping:
+            overlap = performance_deals_found.intersection(set(deal_stage_mapping.keys()))
+            print(Fore.CYAN + f"Overlap between performance deals and stage mapping: {len(overlap)} deals" + Style.RESET_ALL)
+            if len(overlap) < 5:
+                print(Fore.CYAN + f"Sample overlap deals: {list(overlap)[:5]}" + Style.RESET_ALL)
+                print(Fore.CYAN + f"Sample performance deals: {list(performance_deals_found)[:5]}" + Style.RESET_ALL)
+                print(Fore.CYAN + f"Sample stage mapping deals: {list(deal_stage_mapping.keys())[:5]}" + Style.RESET_ALL)
         
         # Build final weekly buckets
         buckets = []
