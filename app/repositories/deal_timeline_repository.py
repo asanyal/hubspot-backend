@@ -10,9 +10,59 @@ class DealTimelineRepository(BaseRepository):
     def _create_indexes(self):
         self.create_index({"deal_id": 1}, unique=True)
         self.create_index({"deal_id": 1, "events.event_date": 1})
+        # Add compound index for meeting queries with date range
+        self.create_index({"events.event_type": 1, "events.event_date": 1})
+        # Add index for sentiment filtering
+        self.create_index({"events.sentiment": 1})
 
     def get_by_deal_id(self, deal_id: str) -> Optional[Dict]:
         return self.find_one({"deal_id": deal_id})
+    
+    def get_meetings_in_date_range(self, start_date: datetime, end_date: datetime) -> List[Dict]:
+        """
+        Get all meetings within a date range using MongoDB aggregation for optimal performance
+        """
+        pipeline = [
+            {
+                "$match": {
+                    "events": {
+                        "$elemMatch": {
+                            "event_type": "Meeting",
+                            "event_date": {
+                                "$gte": start_date,
+                                "$lte": end_date
+                            },
+                            "sentiment": {"$ne": "Unknown"}  # Exclude unknown sentiment
+                        }
+                    }
+                }
+            },
+            {
+                "$project": {
+                    "deal_id": 1,
+                    "events": {
+                        "$filter": {
+                            "input": "$events",
+                            "cond": {
+                                "$and": [
+                                    {"$eq": ["$$this.event_type", "Meeting"]},
+                                    {"$gte": ["$$this.event_date", start_date]},
+                                    {"$lte": ["$$this.event_date", end_date]},
+                                    {"$ne": ["$$this.sentiment", "Unknown"]}
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                "$match": {
+                    "events": {"$ne": []}  # Only return documents with matching events
+                }
+            }
+        ]
+        
+        return list(self.collection.aggregate(pipeline))
 
     def upsert_timeline(self, deal_id: str, timeline_data: Dict) -> bool:
 

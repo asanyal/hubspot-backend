@@ -828,72 +828,44 @@ async def get_latest_meetings(days: int = Query(2, description="Number of days t
         now = datetime.now()
         cutoff_time = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
         
-        print(Fore.YELLOW + f"Current time: {now.isoformat()}" + Style.RESET_ALL)
-        print(Fore.YELLOW + f"Cutoff time (start of day): {cutoff_time.isoformat()}" + Style.RESET_ALL)
+        print(Fore.YELLOW + f"Date range: {cutoff_time.isoformat()} to {now.isoformat()}" + Style.RESET_ALL)
         
-        # Get all timeline documents
-        all_timelines = deal_timeline_repo.find_many({})
+        # Use optimized database query instead of loading all data
+        timeline_results = deal_timeline_repo.get_meetings_in_date_range(cutoff_time, now)
         
         meetings = []
-        total_meetings_checked = 0
+        total_meetings_found = 0
         
-        for timeline in all_timelines:
+        # Process results - data is already filtered at database level
+        for timeline in timeline_results:
             deal_id = timeline.get('deal_id')
             events = timeline.get('events', [])
             
             for event in events:
-                # Check if this is a meeting event
-                if event.get('event_type') == 'Meeting':
-                    total_meetings_checked += 1
-                    event_date = event.get('event_date')
-                    
-                    # Handle different date formats
-                    if isinstance(event_date, str):
-                        try:
-                            # Try to parse as ISO format first
-                            event_date = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
-                        except (ValueError, TypeError):
-                            try:
-                                # Try to parse as datetime string
-                                event_date = datetime.strptime(event_date, "%Y-%m-%d %H:%M")
-                            except (ValueError, TypeError):
-                                print(Fore.RED + f"Could not parse date string: {event_date}" + Style.RESET_ALL)
-                                continue
-                    elif not isinstance(event_date, datetime):
-                        print(Fore.RED + f"Invalid event_date type: {type(event_date)}, value: {event_date}" + Style.RESET_ALL)
-                        continue
-                    
-                    # Convert event_date to naive datetime if it has timezone info
-                    if event_date.tzinfo is not None:
-                        event_date = event_date.replace(tzinfo=None)
-                    # Debug the comparison
-                    is_after_cutoff = event_date >= cutoff_time
-                    is_before_now = event_date <= now
-                    within_range = is_after_cutoff and is_before_now
-                    
-                    # Check if event is within the time window (event_date should be <= now and >= cutoff_time)
-                    if within_range:
-                        # Filter out meetings with "Unknown" sentiment
-                        sentiment = event.get('sentiment', '')
-                        if sentiment.lower() == 'unknown':
-                            print(Fore.YELLOW + f"✗ Skipped meeting (unknown sentiment): {event.get('subject', 'No subject')}" + Style.RESET_ALL)
-                            continue
-                        
-                        meeting = {
-                            "deal_id": deal_id,
-                            "event_date": event_date.isoformat(),
-                            "subject": event.get('subject', ''),
-                            "sentiment": sentiment,
-                            "buyer_intent": event.get('buyer_intent', ''),
-                            "event_id": event.get('event_id', '')
-                        }
-                        meetings.append(meeting)
-                        print(Fore.GREEN + f"✓ Added meeting: {meeting['subject']}" + Style.RESET_ALL) 
-                               
+                total_meetings_found += 1
+                event_date = event.get('event_date')
+                
+                # Convert datetime to ISO string for JSON response
+                if isinstance(event_date, datetime):
+                    event_date_str = event_date.isoformat()
+                else:
+                    # Fallback for any edge cases
+                    event_date_str = str(event_date)
+                
+                meeting = {
+                    "deal_id": deal_id,
+                    "event_date": event_date_str,
+                    "subject": event.get('subject', ''),
+                    "sentiment": event.get('sentiment', ''),
+                    "buyer_intent": event.get('buyer_intent', ''),
+                    "event_id": event.get('event_id', '')
+                }
+                meetings.append(meeting)
+        
         # Sort by event_date in descending order (most recent first)
         meetings.sort(key=lambda x: x['event_date'], reverse=True)
         
-        print(Fore.GREEN + f"Found {len(meetings)} meetings in the past {days} days out of {total_meetings_checked} total meetings checked" + Style.RESET_ALL)
+        print(Fore.GREEN + f"Found {len(meetings)} meetings in the past {days} days using optimized query" + Style.RESET_ALL)
         return meetings
         
     except Exception as e:
@@ -2079,102 +2051,77 @@ async def get_deal_owner_performance_health_buckets(
         
         print(Fore.YELLOW + f"Total days: {total_days}, Number of weeks: {num_weeks}" + Style.RESET_ALL)
         
-        # Get all deal owner performance data
-        all_performance_data = deal_owner_performance_repo.find_many({})
-        
-        if not all_performance_data:
-            return {"buckets": []}
-        
         # Signal type mappings - define these before filtering logic
         positive_signals = {"likely to buy", "very likely to buy"}
         negative_signals = {"less likely to buy"}
         neutral_signals = {"neutral"}
+        all_signal_types = positive_signals | negative_signals | neutral_signals
         
-        # If stage_names is provided, filter deals to only include those from selected stages
+        # Optimized stage filtering: build deal-stage mapping only if needed
+        deal_stage_mapping = {}
         if stage_names:
-            print(Fore.BLUE + f"Filtering deals by stages: {stage_names}" + Style.RESET_ALL)
+            print(Fore.BLUE + f"Building deal-stage mapping for filtering by stages: {stage_names}" + Style.RESET_ALL)
             
-            # Get all deals with their stages to create a mapping
-            all_deals = deal_info_repo.get_all_deals()
-
-            deal_stage_mapping = {}
-
-            for deal in all_deals:
+            # Use projection to only fetch deal_name and stage fields
+            pipeline = [
+                {"$match": {"deal_name": {"$exists": True, "$ne": None}, "stage": {"$exists": True, "$ne": None}}},
+                {"$project": {"deal_name": 1, "stage": 1, "_id": 0}}
+            ]
+            
+            deals_cursor = deal_info_repo.collection.aggregate(pipeline)
+            for deal in deals_cursor:
                 deal_name = deal.get('deal_name')
                 stage = deal.get('stage')
-                if deal_name and stage:
+                if deal_name and stage and stage in stage_names:
                     deal_stage_mapping[deal_name] = stage
             
-            print(Fore.BLUE + f"Found {len(deal_stage_mapping)} deals with stage information" + Style.RESET_ALL)
+            print(Fore.BLUE + f"Found {len(deal_stage_mapping)} deals in target stages" + Style.RESET_ALL)
             
-            # Filter performance data to only include deals from selected stages
-
-            print(Fore.BLUE + f"Filtering for stage names: {stage_names}" + Style.RESET_ALL)
-
-            filtered_performance_data = []
-            for performance_doc in all_performance_data:
-                deals_performance = performance_doc.get("deals_performance", {})
-                filtered_deals_performance = {}
-                
-                for signal_type, signal_data in deals_performance.items():
-                    if signal_type not in (positive_signals | negative_signals | neutral_signals):
-                        continue
-                    
-                    deals = signal_data.get("deals", [])
-                    filtered_deals = []
-                    
-                    for deal in deals:
-                        deal_name = deal.get("deal_name")
-                        if deal_name and deal_name in deal_stage_mapping:
-                            deal_stage = deal_stage_mapping[deal_name]
-                            if deal_stage in stage_names:
-                                filtered_deals.append(deal)
-                    
-                    if filtered_deals:  # Only include signal types that have filtered deals
-                        filtered_deals_performance[signal_type] = {
-                            **signal_data,
-                            "deals": filtered_deals
-                        }
-                
-                if filtered_deals_performance:
-                    filtered_performance_data.append({
-                        **performance_doc,
-                        "deals_performance": filtered_deals_performance
-                    })
-            
-            all_performance_data = filtered_performance_data
-            print(Fore.BLUE + f"Filtered to {len(all_performance_data)} performance documents" + Style.RESET_ALL)
-            
-            # Count total deals after filtering
-            total_filtered_deals = 0
-            for doc in all_performance_data:
-                deals_performance = doc.get("deals_performance", {})
-                for signal_type, signal_data in deals_performance.items():
-                    deals = signal_data.get("deals", [])
-                    total_filtered_deals += len(deals)
-            print(Fore.BLUE + f"Total deals after stage filtering: {total_filtered_deals}" + Style.RESET_ALL)
+            if not deal_stage_mapping:
+                print(Fore.YELLOW + "No deals found in specified stages, returning empty buckets" + Style.RESET_ALL)
+                return {"buckets": []}
         
         # Use defaultdict for automatic initialization
         week_signals = defaultdict(lambda: defaultdict(int))
         
-        # Process all signals and group by week
-        for performance_doc in all_performance_data:
+        # Optimized MongoDB query with projection to reduce data transfer
+        projection = {
+            "deals_performance": 1,
+            "_id": 0
+        }
+        
+        performance_cursor = deal_owner_performance_repo.collection.find({}, projection)
+        
+        # Pre-compile date format for faster parsing
+        date_format = "%d %b %Y"
+        
+        # Process performance data in streaming fashion
+        processed_docs = 0
+        for performance_doc in performance_cursor:
+            processed_docs += 1
             deals_performance = performance_doc.get("deals_performance", {})
             
             for signal_type, signal_data in deals_performance.items():
-                if signal_type not in (positive_signals | negative_signals | neutral_signals):
+                if signal_type not in all_signal_types:
                     continue
                     
                 deals = signal_data.get("deals", [])
                 
                 for deal in deals:
+                    deal_name = deal.get("deal_name")
+                    
+                    # Apply stage filtering early to skip unnecessary processing
+                    if stage_names and deal_name not in deal_stage_mapping:
+                        continue
+                    
                     signal_dates = deal.get("signal_dates", [])
                     
+                    # Process signal dates with optimized date parsing
                     for date_str in signal_dates:
                         try:
-                            signal_date = datetime.strptime(date_str, "%d %b %Y")
+                            signal_date = datetime.strptime(date_str, date_format)
                             
-                            # Skip weekends
+                            # Skip weekends early
                             if signal_date.weekday() >= 5:
                                 continue
                             
@@ -2190,9 +2137,11 @@ async def get_deal_owner_performance_health_buckets(
                                     elif signal_type in neutral_signals:
                                         week_signals[week_index]["neutral"] += 1
                                         
-                        except ValueError as e:
-                            print(Fore.RED + f"Could not parse signal date: {date_str}, error: {str(e)}" + Style.RESET_ALL)
+                        except ValueError:
+                            # Skip invalid dates silently for better performance
                             continue
+        
+        print(Fore.GREEN + f"Processed {processed_docs} performance documents" + Style.RESET_ALL)
         
         # Build final weekly buckets
         buckets = []
@@ -2211,8 +2160,8 @@ async def get_deal_owner_performance_health_buckets(
                 ratio = -1
             
             buckets.append({
-                "bucket_start": week_start.strftime("%d %b %Y"),
-                "bucket_end": week_end.strftime("%d %b %Y"),
+                "bucket_start": week_start.strftime(date_format),
+                "bucket_end": week_end.strftime(date_format),
                 "business_days": 5,  # Always 5 business days (Mon-Fri)
                 "positive_signals": positive_signals_count,
                 "neutral_signals": neutral_signals_count,
@@ -2224,7 +2173,7 @@ async def get_deal_owner_performance_health_buckets(
         return {"buckets": buckets}
         
     except Exception as e:
-        print(Fore.RED + f"Error in deal-owner-performance-health-buckets endpoint: {str(e)}" + Style.RESET_ALL)
+        print(Fore.RED + f"Error in health-scores endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error calculating health scores: {str(e)}")
