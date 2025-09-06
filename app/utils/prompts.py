@@ -181,53 +181,59 @@ parr_principle_prompt = """
 
 buyer_intent_prompt = """
 Analyze the following sales call transcript between the Galileo team and a potential buyer.
+Your task is to evaluate the buyer's intent, based only on explicit, action-oriented verbal evidence in the transcript. Ignore tone, politeness, or general enthusiasm.
+Additionally, identify and summarize any buyer use cases, pain points, or goals related to why they are exploring a Generative AI Evaluation/Observability solution like Galileo. This includes what they are trying to build, measure, improve, or solve — especially related to agent workflows, RAG pipelines, LLM quality, or internal AI initiatives.
 
-Your task is to evaluate the **buyer's intent**, based only on explicit, action-oriented verbal evidence in the transcript. Ignore tone, politeness, or general enthusiasm.
-
-Additionally, identify and summarize any **buyer use cases**, **pain points**, or **goals** related to why they are exploring a Generative AI Evaluation/Observability solution like Galileo. This includes what they are trying to build, measure, improve, or solve — especially related to agent workflows, RAG pipelines, LLM quality, or internal AI initiatives.
-
----
-
-**Important: Do NOT infer intent from positive sentiment.**  
+Important: Do NOT infer intent from positive sentiment.
 Only consider specific behaviors like pricing discussions, implementation interest, urgency, technical blockers, or organizational alignment.
 
----
+Examples of Strong Buying Intent ("Likely to Buy")
 
-**Examples of Strong Buying Intent ("Likely to Buy")**
-- Asking for pricing, pilot/POV/trial/POC, or implementation steps
-- Clearly very impressed by Galileo's value (praise, excitement, etc.)
-- Stating clear, urgent problems Galileo could help solve
-- Confirming budget alignment or deployment interest
+Asking for pricing, pilot/POV/trial/POC, or implementation steps
+Clearly very impressed by Galileo's value (praise, excitement, etc.)
+Stating clear, urgent problems Galileo could help solve
+Confirming budget alignment or deployment interest
 
-**Examples of Disinterest or Blockers ("Less Likely to Buy")**
-- Expressing confusion about Galileo's value
-- Highlighting technical blockers: facing product issues, deployment issues, integration issues
-- Seeing poor results from Galileo (inaccurate metrics, bugs, error, missing features etc.)
+Examples of Disinterest or Blockers ("Less Likely to Buy")
 
----
+Expressing confusion about Galileo's value
+Highlighting technical blockers: facing product issues, deployment issues, integration issues
+Seeing poor results from Galileo (inaccurate metrics, bugs, error, missing features etc.)
+Delaying decisions or implementation (postponing, pausing, waiting for other priorities)
+Resource constraints or competing priorities (limited bandwidth, focusing elsewhere first)
+Organizational hurdles (waiting for approvals, internal alignment issues, stakeholder unavailability)
+Timeline misalignment (pushing timelines out, no immediate need, waiting for future budget cycles)
+Conditional engagement (will revisit later, depends on other outcomes, subject to future changes)
+Risk aversion signals (wanting to see more proof, waiting for others to validate, preferring to observe market)
+Process complications (complex procurement, multiple decision makers creating delays, bureaucratic obstacles)
+Alternative exploration (evaluating other vendors, building in-house solutions, considering different approaches)
 
-Return a **valid JSON object** with:
+Examples of Neutral Intent
 
-1. `"intent"`: One of:
-   - `"Likely to buy"`
-   - `"Neutral"`
-   - `"Less likely to buy"`
+General information gathering without clear direction
+Early-stage exploration with no immediate timeline
+Educational discussions without commitment indicators
 
-2. `"summary"`: A **sectioned, markdown-style breakdown** using dynamic headers that reflect themes from the transcript.
+Return a valid JSON object with:
 
-   - Use custom section headers (e.g., “Use Case: Internal Agent Eval Platform” or “Concerns About Integration”) based on the actual content.
-   - Address the buyer by name (don't call them "the buyer" if possible).
-   - Do **not** use fixed labels.
-   - Bullet points must be concise, objective, and traceable to what was said.
-   - Include information about their Gen AI use case and pain points or challenges they are facing (if mentioned in the transcript).
-   - Mention individuals by name if they appear in the transcript (e.g., “Maya asked…”).
-   - If the buyer's use case or problem is clearly stated, include it as a section header with bullet points. If unclear, do not fabricate.
+"intent": One of:
 
----
+"Likely to buy"
+"Neutral"
+"Less likely to buy"
+
+"summary": A sectioned, markdown-style breakdown using dynamic headers that reflect themes from the transcript.
+
+Use custom section headers (e.g., "Use Case: Internal Agent Eval Platform" or "Concerns About Integration") based on the actual content.
+Address the buyer by name (don't call them "the buyer" if possible).
+Do not use fixed labels.
+Bullet points must be concise, objective, and traceable to what was said.
+Include information about their Gen AI use case and pain points or challenges they are facing (if mentioned in the transcript).
+Mention individuals by name if they appear in the transcript (e.g., "Maya asked…").
+If the buyer's use case or problem is clearly stated, include it as a section header with bullet points. If unclear, do not fabricate.
 
 Return ONLY the JSON string. Do not include any extra commentary, prefix, or suffix.
-
-Seller: {seller_name}  
+Seller: {seller_name}
 Transcript: {call_transcript}
 """
 
