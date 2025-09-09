@@ -824,41 +824,86 @@ async def get_stakeholders(deal_name: str = Query(..., description="The name of 
         raise HTTPException(status_code=500, detail=f"Error fetching stakeholders: {str(e)}")
 
 @router.get("/get-latest-meetings", response_model=List[Dict[str, Any]])
-async def get_latest_meetings(days: int = Query(2, description="Number of days to look back for meetings")):
-    """Get all meetings from any deal that occurred from the start of N days ago to now"""
+async def get_latest_meetings(
+    days: int = Query(2, description="Number of days to look back for meetings"),
+    limit: Optional[int] = Query(None, description="Maximum number of meetings to return (for performance)")
+):
+    """Get all meetings from any deal that occurred from the start of N days ago to now.
+    
+    This endpoint is highly optimized using MongoDB aggregation with $lookup to join
+    timeline and deal_info collections in a single query, eliminating N+1 query problems.
+    
+    For date ranges > 7 days or when limit is specified, uses a paginated approach that
+    sorts at the database level for maximum performance with large datasets.
+    
+    Args:
+        days: Number of days to look back for meetings (default: 2)
+        limit: Optional limit on number of results for performance (auto-applied for large ranges)
+    
+    Returns a list of meetings with the following fields:
+    - deal_id: The name/ID of the deal
+    - deal_stage: The current stage of the deal
+    - event_date: The date of the meeting
+    - subject: The meeting subject
+    - sentiment: The sentiment of the meeting
+    - buyer_intent: The buyer intent signal
+    - event_id: The unique event ID
+    """
     print(Fore.BLUE + f"#### Getting latest meetings from the past {days} days" + Style.RESET_ALL)
     
     try:
+        start_time = datetime.now()
+        
         # Calculate the cutoff time (start of N days ago at 12am)
         now = datetime.now()
         cutoff_time = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
         
         print(Fore.YELLOW + f"Date range: {cutoff_time.isoformat()} to {now.isoformat()}" + Style.RESET_ALL)
         
-        # Use optimized database query instead of loading all data
-        timeline_results = deal_timeline_repo.get_meetings_in_date_range(cutoff_time, now)
+        query_start_time = datetime.now()
         
-        meetings = []
-        total_meetings_found = 0
+        # Use super-optimized database query with single aggregation pipeline
+        # This eliminates the N+1 query problem by joining timeline and deal_info in one query
         
-        # Process results - data is already filtered at database level
-        for timeline in timeline_results:
-            deal_id = timeline.get('deal_id')
-            events = timeline.get('events', [])
+        # For large date ranges or when limit is specified, use the optimized version
+        if limit or days > 7:
+            # Use different optimization strategies based on dataset size
+            effective_limit = limit if limit else (500 if days > 30 else 1000)
             
-            for event in events:
-                total_meetings_found += 1
+            if days > 30:
+                # For very large date ranges, use ultra-fast version
+                print(Fore.MAGENTA + f"Using ultra-fast query with limit: {effective_limit}" + Style.RESET_ALL)
+                timeline_results = deal_timeline_repo.get_meetings_with_deal_stages_in_date_range_ultra_fast(
+                    cutoff_time, now, effective_limit
+                )
+            elif days > 14:
+                # For large date ranges (like 21 days), use simple optimized version
+                print(Fore.YELLOW + f"Using simple optimized query with limit: {effective_limit}" + Style.RESET_ALL)
+                timeline_results = deal_timeline_repo.get_meetings_with_deal_stages_in_date_range_simple(
+                    cutoff_time, now, effective_limit
+                )
+            else:
+                # For medium date ranges, use optimized paginated version
+                print(Fore.CYAN + f"Using optimized paginated query with limit: {effective_limit}" + Style.RESET_ALL)
+                timeline_results = deal_timeline_repo.get_meetings_with_deal_stages_in_date_range_paginated(
+                    cutoff_time, now, effective_limit
+                )
+            
+            meetings = []
+            # Process paginated results - each result is a single meeting
+            for result in timeline_results:
+                event = result.get('event', {})
                 event_date = event.get('event_date')
                 
                 # Convert datetime to ISO string for JSON response
                 if isinstance(event_date, datetime):
                     event_date_str = event_date.isoformat()
                 else:
-                    # Fallback for any edge cases
                     event_date_str = str(event_date)
                 
                 meeting = {
-                    "deal_id": deal_id,
+                    "deal_id": result.get('deal_id'),
+                    "deal_stage": result.get('deal_stage', 'Unknown'),
                     "event_date": event_date_str,
                     "subject": event.get('subject', ''),
                     "sentiment": event.get('sentiment', ''),
@@ -866,11 +911,55 @@ async def get_latest_meetings(days: int = Query(2, description="Number of days t
                     "event_id": event.get('event_id', '')
                 }
                 meetings.append(meeting)
+                    
+            total_meetings_found = len(meetings)
+            
+            query_end_time = datetime.now()
+            query_duration = (query_end_time - query_start_time).total_seconds()
+            print(Fore.CYAN + f"Database query completed in {query_duration:.2f} seconds" + Style.RESET_ALL)
+        else:
+            # Use the original grouped version for smaller datasets
+            timeline_results = deal_timeline_repo.get_meetings_with_deal_stages_in_date_range(cutoff_time, now)
+            
+            meetings = []
+            total_meetings_found = 0
+            
+            # Process results - data includes deal stages from optimized join query
+            for timeline in timeline_results:
+                deal_id = timeline.get('deal_id')
+                deal_stage = timeline.get('deal_stage', 'Unknown')  # Already fetched in aggregation
+                events = timeline.get('events', [])
+                
+                for event in events:
+                    total_meetings_found += 1
+                    event_date = event.get('event_date')
+                    
+                    # Convert datetime to ISO string for JSON response
+                    if isinstance(event_date, datetime):
+                        event_date_str = event_date.isoformat()
+                    else:
+                        # Fallback for any edge cases
+                        event_date_str = str(event_date)
+                    
+                    meeting = {
+                        "deal_id": deal_id,
+                        "deal_stage": deal_stage,
+                        "event_date": event_date_str,
+                        "subject": event.get('subject', ''),
+                        "sentiment": event.get('sentiment', ''),
+                        "buyer_intent": event.get('buyer_intent', ''),
+                        "event_id": event.get('event_id', '')
+                    }
+                    meetings.append(meeting)
         
         # Sort by event_date in descending order (most recent first)
-        meetings.sort(key=lambda x: x['event_date'], reverse=True)
+        # Note: Paginated version is already sorted at database level for better performance
+        if not (limit or days > 7):
+            meetings.sort(key=lambda x: x['event_date'], reverse=True)
         
+        total_duration = (datetime.now() - start_time).total_seconds()
         print(Fore.GREEN + f"Found {len(meetings)} meetings in the past {days} days using optimized query" + Style.RESET_ALL)
+        print(Fore.GREEN + f"Total request duration: {total_duration:.2f} seconds" + Style.RESET_ALL)
         return meetings
         
     except Exception as e:
