@@ -58,6 +58,7 @@ def filter_filler_words(text: str) -> set:
     
     # Add custom noisy words
     custom_noise = {
+        # existing
         'and', 'or', '&', 'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by',
         'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
         'will', 'would', 'could', 'should', 'may', 'might', 'can', 'must', 'shall',
@@ -69,9 +70,29 @@ def filter_filler_words(text: str) -> set:
         'zoom', 'teams', 'webex', 'google', 'meet', 'video', 'audio', 'phone',
         'schedule', 'scheduled', 'calendar', 'invite', 'invitation', 'join',
         'gong', 'recording', 'transcript', 'session', 'webinar', 'presentation',
-        'ai', 'land', 'platform', 'monitor', 'observe', 'group', 'data', 'genai', 'gen ai', 'generative', 'automation', 'business', 'town square', 'town hall', 'evaluate', 'observe', 'protect', 'users', 'blue'
+
+        # generic AI/product words
+        'ai', 'land', 'platform', 'monitor', 'observe', 'genai', 'gen', 'generative',
+        'evaluate', 'protect', 'users', 'team', 'enterprise', 'cloud', 'digital', 'innovation',
+
+        # very common business suffixes
+        'group', 'company', 'inc', 'inc.', 'llc', 'corp', 'corporation', 'co', 'co.', 
+        'plc', 'limited', 'ltd', 'pty', 'se', 'ag',
+
+        # industry generic
+        'automation', 'business', 'global', 'international', 'technologies', 'technology',
+        'systems', 'solutions', 'services', 'network', 'networks', 'financial', 'capital', 
+        'federal', 'holdings', 'associates', 'industries', 'partners', 'consulting',
+        'digital', 'analytics',
+
+        # suffix add-ons found in your list
+        'labs', 'lab', 'studio', 'brands', 'health', 'care', 'ventures', 'markets', 'exchange',
+
+        # filler / context words
+        'new', 'deal', 'renewal', 'opp', 'pilot', 'project', 'team', 'cohort', 'fast', 'start',
+        'oem', 'service', 'services', 'business', 'governance', 'central', 'office'
     }
-    
+        
     # Combine stopwords with custom noise
     all_noise = stop_words.union(custom_noise)
     

@@ -129,6 +129,10 @@ class DataSyncService2:
         all_deals = self.hubspot_service.get_all_deals()
         print(Fore.MAGENTA + f"Found {len(all_deals)} total deals to sync" + Style.RESET_ALL)
 
+        # Track if any deals had new activity
+        any_activity_found = False
+        deals_with_activity = []
+
         for deal in all_deals:
             try:
                 deal_name = deal.get("dealname")
@@ -137,17 +141,39 @@ class DataSyncService2:
 
                 print(Fore.YELLOW + f"Processing deal: {deal_name}" + Style.RESET_ALL)
                 t = time.time()
+                
+                # Sync deal info (always runs, doesn't indicate new activity)
                 self._sync_deal_info(deal_name)
-                self._sync_deal_insights(deal_name, date_str)
-                self._sync_timeline_events(deal_name, date_str)
-                self._sync_meeting_insights(deal_name, date_str)
-                self.sync_deal_owner_performance()
+                
+                # Track activity from these sync operations
+                insights_activity = self._sync_deal_insights(deal_name, date_str)
+                timeline_activity = self._sync_timeline_events(deal_name, date_str)
+                meeting_activity = self._sync_meeting_insights(deal_name, date_str)
+                
+                # Check if this deal had any new activity
+                deal_had_activity = insights_activity or timeline_activity or meeting_activity
+                if deal_had_activity:
+                    any_activity_found = True
+                    deals_with_activity.append(deal_name)
+                    print(Fore.GREEN + f"✓ Found new activity for deal: {deal_name}" + Style.RESET_ALL)
+                else:
+                    print(Fore.GRAY + f"- No new activity for deal: {deal_name}" + Style.RESET_ALL)
+                
                 elapsed = time.time() - t
                 print(Fore.GREEN + f"Done syncing deal {deal_name} for date {date_str}.\nTook {elapsed:.2f} seconds" + Style.RESET_ALL)
 
             except Exception as e:
                 print(Fore.RED + f"Error processing deal {deal_name}: {str(e)}" + Style.RESET_ALL)
                 continue
+
+        # Only sync deal owner performance if there was any activity
+        if any_activity_found:
+            print(Fore.CYAN + f"🔄 Found activity in {len(deals_with_activity)} deals: {', '.join(deals_with_activity[:5])}" + 
+                  (f" and {len(deals_with_activity) - 5} more..." if len(deals_with_activity) > 5 else "") + Style.RESET_ALL)
+            print(Fore.CYAN + "Syncing deal owner performance data due to new activity..." + Style.RESET_ALL)
+            self.sync_deal_owner_performance()
+        else:
+            print(Fore.YELLOW + "⏭️  No new activity found for any deals. Skipping deal owner performance sync." + Style.RESET_ALL)
 
         print(Fore.GREEN + f"## Successfully synced all stages for date: {date_str}" + Style.RESET_ALL)
 
@@ -303,8 +329,12 @@ class DataSyncService2:
         except Exception as e:
             print(Fore.RED + f"Error syncing deal info: {str(e)}" + Style.RESET_ALL)
 
-    def _sync_deal_insights(self, deal_name: str, date_str: str) -> None:
-        """Sync deal insights for a specific date"""
+    def _sync_deal_insights(self, deal_name: str, date_str: str) -> bool:
+        """Sync deal insights for a specific date
+        
+        Returns:
+            bool: True if new insights were found and processed, False otherwise
+        """
         try:
             print(f"Listing all the calls on date {date_str}")
             calls = self.gong_service.list_calls(date_str)
@@ -342,13 +372,21 @@ class DataSyncService2:
                     
                     print(Fore.BLUE + f"[MongoDB] Updating DealInsights with new concerns from {date_str}." + Style.RESET_ALL)
                     self.deal_insights_repo.upsert_activity_with_concerns_list(deal_name, insights_data, new_concerns)
+                    return True  # Found and processed new insights
             else:
                 print(Fore.RED + f"Did not find a call for {company_name} on {date_str}" + Style.RESET_ALL)
+                return False  # No call found, no new insights
             
         except Exception as e:
             print(Fore.RED + f"Error syncing deal insights: {str(e)}" + Style.RESET_ALL)
+            return False  # Error occurred, no new insights processed
 
-    def _sync_timeline_events(self, deal_name: str, date_str: str) -> None:
+    def _sync_timeline_events(self, deal_name: str, date_str: str) -> bool:
+        """Sync timeline events for a specific date
+        
+        Returns:
+            bool: True if new timeline events were found and processed, False otherwise
+        """
         try:
             start_date = datetime.strptime(date_str, '%Y-%m-%d')
             end_date = datetime.strptime(date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
@@ -358,11 +396,11 @@ class DataSyncService2:
 
             if not timeline_data:
                 print("No timeline data found.")
-                return
+                return False
 
             if "events" not in timeline_data:
                 print("No events found in timeline data.")
-                return
+                return False
 
             if timeline_data["events"]:
                 deal_timeline_document = self.deal_timeline_repo.get_by_deal_id(deal_name)
@@ -384,14 +422,25 @@ class DataSyncService2:
                             # Add the new event
                             print(Fore.YELLOW + f"Adding new event with subject: {subject}" + Style.RESET_ALL)
                             self.deal_timeline_repo.add_event(deal_name, new_event)
+                    return True  # Successfully processed timeline events
                 else:
                     timeline_data["last_updated"] = datetime.now()
                     self.deal_timeline_repo.upsert_timeline(deal_name, timeline_data)
                     print(Fore.GREEN + f"Successfully created new timeline for deal: {deal_name}" + Style.RESET_ALL)
+                    return True  # Successfully created new timeline
+            else:
+                print("No events to process in timeline data.")
+                return False  # No events found
         except Exception as e:
             print(Fore.RED + f"Error syncing deal_timeline. Deal: {deal_name}. Error: {str(e)}" + Style.RESET_ALL)
+            return False  # Error occurred, no timeline events processed
 
-    def _sync_meeting_insights(self, deal_name: str, date_str: str) -> None:
+    def _sync_meeting_insights(self, deal_name: str, date_str: str) -> bool:
+        """Sync meeting insights for a specific date
+        
+        Returns:
+            bool: True if new meeting insights were found and processed, False otherwise
+        """
         try:
 
             calls = self.gong_service.list_calls(date_str)
@@ -417,11 +466,17 @@ class DataSyncService2:
                     print(Fore.BLUE + f"[MongoDB] Updating MeetingInsights for {deal_name}" + Style.RESET_ALL)
                     meeting_id = f"{deal_name}_{date_str}"
                     self.meeting_insights_repo.upsert_meeting(deal_name, meeting_id, insights)
+                    return True  # Successfully processed meeting insights
+                else:
+                    print(Fore.YELLOW + f"No insights returned for call {call_id}" + Style.RESET_ALL)
+                    return False  # Call found but no insights
             else:
                 print(Fore.RED + f"No call found for {company_name} on {date_str}" + Style.RESET_ALL)
+                return False  # No call found
 
         except Exception as e:
             print(Fore.RED + f"Error syncing meeting insights: {str(e)}" + Style.RESET_ALL)
+            return False  # Error occurred, no meeting insights processed
 
     def _get_hubspot_deal_info(self, deal_name: str) -> Optional[Dict]:
         """Get deal information from HubSpot"""
