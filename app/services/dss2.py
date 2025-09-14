@@ -108,19 +108,112 @@ class DataSyncService2:
             print(Fore.RED + f"Error processing deal {deal_name}: {str(e)}" + Style.RESET_ALL)
 
     def sync_deal_date_range(self, deal_name: str, start_date: str, end_date: str) -> None:
-        """Sync a specific deal for a date range"""
+        """Sync a specific deal for a date range
+        
+        This method will:
+        1. Clear all existing timeline events for the deal within the specified date range
+        2. Sync fresh data from HubSpot for each day in the range
+        
+        Args:
+            deal_name: Name of the deal to sync
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format (inclusive)
+        """
         print(Fore.YELLOW + f"Syncing data for DEAL: {deal_name}, from {start_date} to {end_date}" + Style.RESET_ALL)
         
         start = datetime.strptime(start_date, "%Y-%m-%d")
         end = datetime.strptime(end_date, "%Y-%m-%d")
+        
+        # Clear existing timeline events for this date range first
+        print(Fore.CYAN + f"🗑️  Clearing existing timeline events for {deal_name} from {start_date} to {end_date}" + Style.RESET_ALL)
+        self._clear_timeline_events_for_date_range(deal_name, start, end)
+        
         current_date = start
-
         while current_date <= end:
             current_date_str = current_date.strftime("%Y-%m-%d")
             self.sync_deal_on_date(deal_name, current_date_str)
             current_date += timedelta(days=1)
 
         print(Fore.GREEN + f"Successfully synced deal {deal_name} for date range {start_date} to {end_date}" + Style.RESET_ALL)
+
+    def _clear_timeline_events_for_date_range(self, deal_name: str, start_date: datetime, end_date: datetime) -> None:
+        """Clear existing timeline events for a deal within the specified date range"""
+        try:
+            # Get existing timeline document
+            timeline_document = self.deal_timeline_repo.get_by_deal_id(deal_name)
+            
+            if not timeline_document or "events" not in timeline_document:
+                print(f"No existing timeline events found for {deal_name}")
+                return
+            
+            existing_events = timeline_document.get("events", [])
+            events_to_keep = []
+            events_removed = 0
+            
+            # Filter out events that fall within the date range
+            for event in existing_events:
+                event_date = event.get("event_date")
+                
+                # Handle different date formats
+                if isinstance(event_date, str):
+                    try:
+                        # Try parsing as ISO format first
+                        event_datetime = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+                    except ValueError:
+                        try:
+                            # Try parsing as date only
+                            event_datetime = datetime.strptime(event_date, "%Y-%m-%d")
+                        except ValueError:
+                            # If we can't parse the date, keep the event to be safe
+                            events_to_keep.append(event)
+                            continue
+                elif isinstance(event_date, datetime):
+                    event_datetime = event_date
+                else:
+                    # If date format is unknown, keep the event to be safe
+                    events_to_keep.append(event)
+                    continue
+                
+                # Convert to date-only for comparison (ignore time)
+                event_date_only = event_datetime.date()
+                start_date_only = start_date.date()
+                end_date_only = end_date.date()
+                
+                # Keep events outside the date range
+                if event_date_only < start_date_only or event_date_only > end_date_only:
+                    events_to_keep.append(event)
+                else:
+                    events_removed += 1
+                    print(f"  Removing event: {event.get('subject', 'No subject')} on {event_date}")
+            
+            # Update the timeline document with filtered events
+            if events_removed > 0:
+                # Use direct MongoDB update to avoid format conversion issues
+                try:
+                    update_result = self.deal_timeline_repo.update_one(
+                        {"deal_id": deal_name},
+                        {
+                            "$set": {
+                                "events": events_to_keep,
+                                "last_updated": datetime.now()
+                            }
+                        }
+                    )
+                    
+                    if update_result:
+                        print(Fore.GREEN + f"✅ Removed {events_removed} existing events for {deal_name} in date range {start_date.date()} to {end_date.date()}" + Style.RESET_ALL)
+                        print(Fore.BLUE + f"📊 Kept {len(events_to_keep)} events outside the date range" + Style.RESET_ALL)
+                    else:
+                        print(Fore.RED + f"Failed to update timeline document for {deal_name}" + Style.RESET_ALL)
+                except Exception as update_error:
+                    print(Fore.RED + f"Error updating timeline document for {deal_name}: {str(update_error)}" + Style.RESET_ALL)
+            else:
+                print(f"No events found in the specified date range for {deal_name}")
+                
+        except Exception as e:
+            print(Fore.RED + f"Error clearing timeline events for {deal_name}: {str(e)}" + Style.RESET_ALL)
+            import traceback
+            traceback.print_exc()
 
     def sync_all_stages_on_date(self, date_str: str) -> None:
         """Sync all deals across all stages for a single date"""

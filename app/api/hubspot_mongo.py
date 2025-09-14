@@ -1827,7 +1827,14 @@ async def sync_deal_date_range(
     start_date: str = Query(..., description="Start date in format YYYY-MM-DD"),
     end_date: str = Query(..., description="End date in format YYYY-MM-DD")
 ):
-    """Sync a specific deal for a date range"""
+    """Sync a specific deal for a date range
+    
+    This endpoint will:
+    1. Clear all existing timeline events for the deal within the specified date range
+    2. Sync fresh data from HubSpot for each day in the range
+    
+    This ensures a clean sync without stale or duplicate data.
+    """
     try:
         # Generate a unique job ID
         job_id = f"sync_deal_range_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
