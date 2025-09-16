@@ -1613,6 +1613,124 @@ async def delete_deal(dealName: str = Query(..., description="The name of the de
         print(Fore.RED + f"Error deleting deal data: {str(e)}" + Style.RESET_ALL)
         raise HTTPException(status_code=500, detail=f"Error deleting deal data: {str(e)}")
 
+@router.delete("/delete-meeting-by-title")
+async def delete_meeting_by_title(
+    meeting_title: str = Query(..., description="The exact meeting title to delete from all deals"),
+    deal: Optional[str] = Query(None, description="Optional: specific deal name to target (if not provided, searches all deals)")
+):
+    """Delete timeline events with matching meeting title from all deals or a specific deal
+    
+    This endpoint will:
+    1. Loop through all deals (or a specific deal) in the deal_timeline collection
+    2. Check each event's subject field for an exact match (case-insensitive, trimmed)
+    3. Delete matching events from the timeline
+    
+    Args:
+        meeting_title: The exact meeting title to match against event subjects
+        deal: Optional deal name to target specific deal only
+        
+    Returns:
+        dict: Contains count of events deleted and list of affected deals
+    """
+    if deal:
+        print(Fore.BLUE + f"#### Deleting timeline events with title: '{meeting_title}' from deal: '{deal}'" + Style.RESET_ALL)
+    else:
+        print(Fore.BLUE + f"#### Deleting timeline events with title: '{meeting_title}' from all deals" + Style.RESET_ALL)
+    
+    try:
+        # Normalize the input title for comparison
+        normalized_title = meeting_title.strip().lower()
+        
+        # Get timeline documents based on deal parameter
+        if deal:
+            # Target specific deal only
+            all_timelines = deal_timeline_repo.find_many({"deal_id": deal})
+            if not all_timelines:
+                return {
+                    "total_events_deleted": 0,
+                    "affected_deals_count": 0,
+                    "affected_deals": [],
+                    "meeting_title_searched": meeting_title,
+                    "target_deal": deal,
+                    "message": f"No timeline found for deal: {deal}"
+                }
+        else:
+            # Get all timeline documents
+            all_timelines = deal_timeline_repo.find_many({})
+        
+        total_events_deleted = 0
+        affected_deals = []
+        
+        for timeline in all_timelines:
+            deal_id = timeline.get('deal_id')
+            events = timeline.get('events', [])
+            
+            if not deal_id or not events:
+                continue
+                
+            try:
+                events_to_keep = []
+                events_deleted_for_deal = 0
+                
+                # Filter out matching events
+                for event in events:
+                    event_subject = event.get('subject', '').strip().lower()
+                    
+                    # Check for exact match (case-insensitive, trimmed)
+                    if event_subject == normalized_title:
+                        events_deleted_for_deal += 1
+                        total_events_deleted += 1
+                        print(f"  Deleting event from {deal_id}: {event.get('subject', 'No subject')}")
+                    else:
+                        events_to_keep.append(event)
+                
+                # Update the timeline document if events were deleted
+                if events_deleted_for_deal > 0:
+                    update_result = deal_timeline_repo.update_one(
+                        {"deal_id": deal_id},
+                        {
+                            "$set": {
+                                "events": events_to_keep,
+                                "last_updated": datetime.now()
+                            }
+                        }
+                    )
+                    
+                    if update_result:
+                        affected_deals.append({
+                            "deal_id": deal_id,
+                            "events_deleted": events_deleted_for_deal
+                        })
+                        print(Fore.GREEN + f"✅ Deleted {events_deleted_for_deal} events from deal: {deal_id}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.RED + f"Failed to update timeline for deal: {deal_id}" + Style.RESET_ALL)
+                        
+            except Exception as e:
+                print(Fore.RED + f"Error processing deal {deal_id}: {str(e)}" + Style.RESET_ALL)
+                continue
+        
+        # Prepare response
+        response = {
+            "total_events_deleted": total_events_deleted,
+            "affected_deals_count": len(affected_deals),
+            "affected_deals": affected_deals,
+            "meeting_title_searched": meeting_title
+        }
+        
+        # Add target deal info if specified
+        if deal:
+            response["target_deal"] = deal
+            print(Fore.GREEN + f"🎯 Deletion complete: {total_events_deleted} events deleted from deal '{deal}'" + Style.RESET_ALL)
+        else:
+            print(Fore.GREEN + f"🎯 Deletion complete: {total_events_deleted} events deleted from {len(affected_deals)} deals" + Style.RESET_ALL)
+        return response
+        
+    except Exception as e:
+        print(Fore.RED + f"Error in delete-meeting-by-title endpoint: {str(e)}" + Style.RESET_ALL)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error deleting meeting events: {str(e)}")
+
 def run_sync_job_v2(job_id: str, date_str: str, stage: str = "all", deal: Optional[str] = None):
     """Background function to run sync operations using DataSyncService2"""
     try:
