@@ -69,7 +69,7 @@ def filter_filler_words(text: str) -> set:
         'call', 'meeting', 'demo', 'discussion', 'talk', 'chat', 'conversation',
         'zoom', 'teams', 'webex', 'google', 'meet', 'video', 'audio', 'phone',
         'schedule', 'scheduled', 'calendar', 'invite', 'invitation', 'join',
-        'gong', 'recording', 'transcript', 'session', 'webinar', 'presentation', 'bank'
+        'gong', 'recording', 'transcript', 'session', 'webinar', 'presentation', 'bank',
 
         # generic AI/product words
         'ai', 'land', 'platform', 'monitor', 'observe', 'genai', 'gen', 'generative',
