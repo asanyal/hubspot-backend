@@ -194,25 +194,33 @@ Clearly very impressed by Galileo's value (praise, excitement, etc.)
 Stating clear, urgent problems Galileo could help solve
 Confirming budget alignment or deployment interest
 
-Examples of Disinterest or Blockers ("Less Likely to Buy")
+Specific signals of NEGATIVE intent - Disinterest or Blockers ("Less Likely to Buy")
 
-Expressing confusion about Galileo's value
-Highlighting technical blockers: facing product issues, deployment issues, integration issues
-Seeing poor results from Galileo (inaccurate metrics, bugs, error, missing features etc.)
-Delaying decisions or implementation (postponing, pausing, waiting for other priorities)
-Resource constraints or competing priorities (limited bandwidth, focusing elsewhere first)
-Organizational hurdles (waiting for approvals, internal alignment issues, stakeholder unavailability)
-Timeline misalignment (pushing timelines out, no immediate need, waiting for future budget cycles)
-Conditional engagement (will revisit later, depends on other outcomes, subject to future changes)
-Risk aversion signals (wanting to see more proof, waiting for others to validate, preferring to observe market)
-Process complications (complex procurement, multiple decision makers creating delays, bureaucratic obstacles)
-Alternative exploration (evaluating other vendors, building in-house solutions, considering different approaches)
+Negative Intent Signals (Less Likely to Buy)
+	1.	Unclear Value - Confusion or skepticism about Galileo's value, need for more proof.
+	2.	Technical/Results Issues - Product bugs, poor results, integration/deployment blockers.
+	3.	Delays & Deferrals - Postponing decisions, “will revisit later,” no commitment on timeline.
+	4.	Constraints - Budget, resources, or competing priorities blocking progress.
+	5.	Internal Hurdles - Approvals, alignment issues, stakeholder unavailability, procurement complexity.
+	6.	Exploring Alternatives - Evaluating competitors, in-house builds, running bake-offs.
 
-Examples of Neutral Intent
+Specific signals of NEUTRAL Intent
 
-General information gathering without clear direction
-Early-stage exploration with no immediate timeline
-Educational discussions without commitment indicators
+1. General information gathering without clear direction
+2. Early-stage exploration with no immediate timeline (tire-kicking)
+3. Mixed signals
+    - not committing to a timeline or implementation
+    - talking about competitors or bake-offs
+    - talking about other vendors
+    - talking about building in-house solutions
+    - talking about different vendors
+    - talking about different approaches
+3. Educational discussions without commitment indicators
+4. No clear direction or purpose
+5. No clear timeline or implementation
+6. No clear budget or resources
+7. No clear stakeholders or decision makers
+8. No clear requirements or specifications
 
 Return a valid JSON object with:
 
