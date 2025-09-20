@@ -187,12 +187,16 @@ Additionally, identify and summarize any buyer use cases, pain points, or goals 
 Important: Do NOT infer intent from positive sentiment.
 Only consider specific behaviors like pricing discussions, implementation interest, urgency, technical blockers, or organizational alignment.
 
-Examples of Strong Buying Intent ("Likely to Buy")
+Specific signals of POSITIVE intent -Strong Buying Intent ("Likely to Buy")
 
-Asking for pricing, pilot/POV/trial/POC, or implementation steps
-Clearly very impressed by Galileo's value (praise, excitement, etc.)
-Stating clear, urgent problems Galileo could help solve
-Confirming budget alignment or deployment interest
+1. Asking for pricing, pilot/POV/trial/POC, or implementation steps
+2. Signals of being impressed by Galileo's value (praise, excitement, etc.)
+3. Stating clear problems Galileo could help solve
+4. Showing signals of excitement
+4. Praising Galileo
+5. Interest in doing a Pilot or a proof of concept
+6. Asking about budgets and costs
+7. Interest in deployment or using Galileo
 
 Specific signals of NEGATIVE intent - Disinterest or Blockers ("Less Likely to Buy")
 

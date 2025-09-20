@@ -626,12 +626,17 @@ class HubspotService:
 
                         if result is not None:
                             if (result.get("intent") and result.get("intent") != "N/A" and 
-                                result.get("summary") and isinstance(result.get("summary"), dict)):
+                                result.get("summary") and result.get("summary") != "N/A"):
                                 buyer_intent = {
                                     "intent": result.get("intent", "N/A"),
-                                    "explanation": result.get("summary", {})
+                                    "explanation": result.get("summary", "N/A")
                                 }
                                 print("Created the Buyer intent dictionary with intent and explanation: ", buyer_intent)
+                                print(f"🔍 DEBUG HUBSPOT: buyer_intent explanation type: {type(buyer_intent['explanation'])}")
+                                if isinstance(buyer_intent['explanation'], dict):
+                                    print(f"🔍 DEBUG HUBSPOT: buyer_intent explanation keys: {list(buyer_intent['explanation'].keys())}")
+                                else:
+                                    print(f"⚠️ WARNING HUBSPOT: buyer_intent explanation is not a dict, it's: {type(buyer_intent['explanation'])}")
                             else:
                                 print(f"Invalid buyer intent data! Doing N/A.")
                                 buyer_intent = {"intent": "N/A", "explanation": "N/A"}
@@ -677,6 +682,11 @@ class HubspotService:
                         "buyer_intent": buyer_intent["intent"],
                         "buyer_intent_explanation": buyer_intent["explanation"]
                     }
+                    print(f"🔍 DEBUG HUBSPOT EVENT: buyer_intent_explanation type: {type(event['buyer_intent_explanation'])}")
+                    if isinstance(event['buyer_intent_explanation'], dict):
+                        print(f"🔍 DEBUG HUBSPOT EVENT: buyer_intent_explanation keys: {list(event['buyer_intent_explanation'].keys())}")
+                    else:
+                        print(f"⚠️ WARNING HUBSPOT EVENT: buyer_intent_explanation is not a dict, it's: {type(event['buyer_intent_explanation'])}")
 
                     if event.get("type") == "Meeting":
                         for prefix in prefixes:

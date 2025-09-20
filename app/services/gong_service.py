@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Any
-from app.services.llm_service import ask_openai
+from app.services.llm_service import ask_openai, ask_anthropic
 
 from app.core.config import settings
 from app.utils.prompts import champion_prompt, parr_principle_prompt, buyer_intent_prompt, pricing_concerns_prompt, no_decision_maker_prompt, already_has_vendor_prompt
@@ -38,6 +38,83 @@ except LookupError:
     nltk.download('stopwords')
 
 init()
+
+def parse_markdown_buyer_intent(markdown_text: str, intent: str = "Likely to buy") -> Dict:
+    """
+    Parse markdown-formatted buyer intent response into structured dictionary format.
+    
+    Args:
+        markdown_text: The markdown-formatted text from LLM
+        intent: The buyer intent classification
+        
+    Returns:
+        Dict with structured format: {"intent": str, "summary": dict}
+    """
+    try:
+        sections = {}
+        current_section = None
+        current_bullets = []
+        
+        # Handle both actual newlines and escaped \n characters
+        if '\\n' in markdown_text:
+            lines = markdown_text.replace('\\n', '\n').split('\n')
+        else:
+            lines = markdown_text.split('\n')
+        
+        print(f"DEBUG: Parsing markdown with {len(lines)} lines")
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            print(f"DEBUG: Processing line: '{line[:50]}...'") if len(line) > 50 else print(f"DEBUG: Processing line: '{line}'")
+                
+            # Check if this is a section header (starts with ##)
+            if line.startswith('## '):
+                # Save previous section if it exists
+                if current_section and current_bullets:
+                    print(f"DEBUG: Saving section '{current_section}' with {len(current_bullets)} bullets")
+                    sections[current_section] = current_bullets
+                
+                # Start new section
+                current_section = line[3:].strip()  # Remove "## "
+                current_bullets = []
+                print(f"DEBUG: Starting new section: '{current_section}'")
+                
+            # Check if this is a bullet point (starts with - or •)
+            elif (line.startswith('- ') or line.startswith('• ')) and current_section:
+                # Handle both - and • bullet points
+                if line.startswith('• '):
+                    bullet_text = line[2:].strip()  # Remove "• "
+                else:
+                    bullet_text = line[2:].strip()  # Remove "- "
+                    
+                if bullet_text:
+                    current_bullets.append(bullet_text)
+                    print(f"DEBUG: Added bullet to '{current_section}': '{bullet_text[:50]}...'") if len(bullet_text) > 50 else print(f"DEBUG: Added bullet to '{current_section}': '{bullet_text}'")
+        
+        # Don't forget the last section
+        if current_section and current_bullets:
+            print(f"DEBUG: Saving final section '{current_section}' with {len(current_bullets)} bullets")
+            sections[current_section] = current_bullets
+        elif current_section:
+            print(f"DEBUG: Section '{current_section}' has no bullets, not saving")
+            
+        print(f"DEBUG: Final sections created: {list(sections.keys())}")
+        print(f"DEBUG: Total sections: {len(sections)}")
+        
+        return {
+            "intent": intent,
+            "summary": sections
+        }
+        
+    except Exception as e:
+        print(f"Error parsing markdown buyer intent: {str(e)}")
+        return {
+            "intent": "Unable to determine",
+            "summary": {"Parsing Error": [f"Could not parse markdown response: {str(e)}"]}
+        }
 
 def filter_filler_words(text: str) -> set:
     """
@@ -361,46 +438,64 @@ class GongService:
     def get_buyer_intent_json(self, call_transcript, seller_name) -> Dict:
         try:
             print("Getting buyer intent.")
-            response = ask_openai(
-                user_content=buyer_intent_prompt.format(call_transcript=call_transcript, seller_name=seller_name),
+            print("🔍 CALLING LLM for buyer intent analysis...")
+            response = ask_anthropic(
+                user_content=buyer_intent_prompt.format(
+                    call_transcript=call_transcript, 
+                    seller_name=seller_name
+                ),
                 system_content="You are a smart Sales Analyst that analyzes Sales calls."
             )
+            print(f"Received response from LLM: {response[:100]}...")
             
-            # Clean the response by replacing newlines with spaces
-            response = response.replace('\n', ' ')
-            
-            # Try to parse as JSON
+            # First, try to parse as JSON (in case LLM returns proper JSON)
             try:
                 intent_json = json.loads(response)
+                print("Successfully parsed as JSON")
+                
+                # Check if the summary is a string that needs to be parsed as markdown
+                if isinstance(intent_json.get("summary"), str) and intent_json["summary"].startswith("##"):
+                    print("JSON summary is markdown string, parsing it into structured format...")
+                    structured_summary = parse_markdown_buyer_intent(intent_json["summary"], intent_json.get("intent", "Likely to buy"))
+                    intent_json["summary"] = structured_summary["summary"]
+                    print(f"Converted markdown summary to structured format with {len(intent_json['summary'])} sections")
+                    
             except json.JSONDecodeError:
-                print("Coupd not parse the buyer intent json into a JSON object")
-                import re
-                json_match = re.search(r'(\{.*\})', response, re.DOTALL)
-                if json_match:
-                    try:
-                        intent_json = json.loads(json_match.group(1))
-                    except:
-                        intent_json = {
-                            "intent": "Unable to determine",
-                            "explanation": "Could not parse response"
-                        }
-                else:
-                    intent_json = {
-                        "intent": "Unable to determine",
-                        "explanation": "Could not parse response"
-                    }
+                print("Response is not JSON, attempting to parse as markdown...")
+                
+                # Try to extract intent from the response
+                intent = "Likely to buy"  # Default intent
+                
+                # Look for intent indicators in the response
+                response_lower = response.lower()
+                if "less likely to buy" in response_lower or "unlikely to buy" in response_lower:
+                    intent = "Less likely to buy"
+                elif "neutral" in response_lower:
+                    intent = "Neutral"
+                elif "likely to buy" in response_lower:
+                    intent = "Likely to buy"
+                
+                # Parse the markdown response into structured format
+                intent_json = parse_markdown_buyer_intent(response, intent)
+                print(f"Parsed markdown into structured format with {len(intent_json.get('summary', {}))} sections")
                     
             # Ensure the response has the expected fields
             if "intent" not in intent_json:
                 intent_json["intent"] = "Unable to determine"
-            if "explanation" not in intent_json:
-                intent_json["explanation"] = "No explanation provided"
-            print("Returning intent_json successfully!")
+            if "summary" not in intent_json:
+                intent_json["summary"] = "No explanation provided"
+            # Debug: Print the structure if it's a dictionary
+            if isinstance(intent_json.get("summary"), dict):
+                print(f"✅ Successfully structured buyer intent with sections: {list(intent_json['summary'].keys())}")
+            else:
+                print(f"⚠️ WARNING: intent_json summary is type {type(intent_json.get('summary'))}, not dict!")
+            
+            print("🎯 Returning intent_json successfully!")
             return intent_json
         except Exception as e:
             return {
                 "intent": "Error",
-                "explanation": f"Error analyzing transcript: {str(e)}"
+                "summary": f"Error analyzing transcript: {str(e)}"
             }
 
 
@@ -431,7 +526,7 @@ class GongService:
             # Default response if no call found
             default_response = {
                 "intent": "Not available",
-                "explanation": f"No call found on {call_date}"
+                "summary": f"No call found on {call_date}"
             }
 
             calls_from_gong = self.list_calls(call_date)
@@ -462,7 +557,7 @@ class GongService:
                 if not full_transcript:
                     return {
                         "intent": "No Transcript",
-                        "explanation": f"Call found but transcript unavailable for '{call_title}' on {call_date}"
+                        "summary": f"Call found but transcript unavailable for '{call_title}' on {call_date}"
                     }
 
                 # Get buyer intent analysis for the transcript
@@ -473,7 +568,7 @@ class GongService:
         except Exception as e:
             return {
                 "intent": "Error",
-                "explanation": f"Error analyzing call: {str(e)}"
+                "summary": f"Error analyzing call: {str(e)}"
             }
 
     def get_speaker_data(self, company_name: str, start_date: datetime, end_date: datetime) -> Dict[str, Speaker]:

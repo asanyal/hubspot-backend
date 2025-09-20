@@ -445,9 +445,14 @@ class DealTimelineRepository(BaseRepository):
                 "content": event['content'] or event['content_preview'],
                 "sentiment": event['sentiment'],
                 "buyer_intent": event['buyer_intent'],
-                "buyer_intent_explanation": event['buyer_intent_explanation'] if isinstance(event['buyer_intent_explanation'], dict) else "N/A",
+                "buyer_intent_explanation": event.get('buyer_intent_explanation', "N/A"),
                 "engagement_id": event['engagement_id']
             }
+            print(f"🔍 DEBUG REPO: Transformed event buyer_intent_explanation type: {type(transformed_event['buyer_intent_explanation'])}")
+            if isinstance(transformed_event['buyer_intent_explanation'], dict):
+                print(f"🔍 DEBUG REPO: Transformed event buyer_intent_explanation keys: {list(transformed_event['buyer_intent_explanation'].keys())}")
+            else:
+                print(f"⚠️ WARNING REPO: buyer_intent_explanation is not a dict, it's: {type(transformed_event['buyer_intent_explanation'])}")
             transformed_events.append(transformed_event)
 
         # Sort events by date
@@ -491,7 +496,7 @@ class DealTimelineRepository(BaseRepository):
             "content": event['content'] or event['content_preview'],
             "sentiment": event['sentiment'],
             "buyer_intent": event['buyer_intent'],
-            "buyer_intent_explanation": event['buyer_intent_explanation'] if isinstance(event['buyer_intent_explanation'], dict) else "N/A",
+            "buyer_intent_explanation": event.get('buyer_intent_explanation', "N/A"),
             "engagement_id": event['engagement_id']
         }
 

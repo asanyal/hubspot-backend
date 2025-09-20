@@ -36,7 +36,7 @@ def ask_openai(user_content: str, system_content: str = "You are a smart Sales A
         api_key = os.getenv("OPENAI_API_KEY")
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
-            model="gpt-4-turbo-preview",
+            model="gpt-5",
             messages=[
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_content}
@@ -52,7 +52,7 @@ def ask_openai(user_content: str, system_content: str = "You are a smart Sales A
             user_content = user_content[:100000] + "..."  # Truncate to roughly 25k tokens
             try:
                 response = client.chat.completions.create(
-                    model="gpt-4-turbo-preview",
+                    model="gpt-5",
                     messages=[
                         {"role": "system", "content": system_content},
                         {"role": "user", "content": user_content}
@@ -71,17 +71,26 @@ def ask_anthropic(
     user_content,
     system_content="You are a smart assistant",
     api_key=os.getenv("ANTHROPIC_API_KEY"),
-    model="claude-3-7-sonnet-20250219"
+    model="claude-opus-4-1-20250805"
 ):
-    client = Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model=model,
-        system=system_content,
-        messages=[
-            {"role": "user", "content": user_content}
-        ],
-        max_tokens=1024,
-        temperature=0
-    )
-    output = response.content[0].text.replace("```markdown", "").replace("```code", "").replace("```html", "").replace("```", "").replace('\n', ' ').replace("```json", "").replace("json", "")
-    return output.strip()
+    try:
+        print(f"##### ask_anthropic called with model: {model} #####")
+        client = Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model=model,
+            system=system_content,
+            messages=[
+                {"role": "user", "content": user_content}
+            ],
+            max_tokens=4096,
+            temperature=0
+        )
+        output = response.content[0].text.replace("```markdown", "").replace("```code", "").replace("```html", "").replace("```", "").replace('\n', ' ').replace("```json", "").replace("json", "")
+
+        print(f"##### Anthropic output #####")
+        print(output)
+        print(f"##### Anthropic output #####")
+        return output.strip()
+    except Exception as e:
+        print(f"Error in ask_anthropic: {str(e)}")
+        return f"Error: Failed to get response from Anthropic: {str(e)}"
