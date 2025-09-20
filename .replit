@@ -3,7 +3,7 @@ run = "uvicorn main:app --host 0.0.0.0 --port 8000"
 
 [nix]
 channel = "stable-24_05"
-packages = ["vim"]
+packages = ["cacert", "gdb", "gitFull", "glibcLocales", "libffi", "libuv", "libxcrypt", "pkg-config", "portaudio", "vim", "xsimd", "zeromq", "lsof"]
 
 [deployment]
 run = ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port 8000"]
@@ -11,3 +11,6 @@ run = ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port 8000"]
 [[ports]]
 localPort = 8000
 externalPort = 80
+
+[agent]
+expertMode = true
