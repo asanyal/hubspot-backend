@@ -150,7 +150,7 @@ def filter_filler_words(text: str) -> set:
 
         # generic AI/product words
         'ai', 'land', 'platform', 'monitor', 'observe', 'genai', 'gen', 'generative',
-        'evaluate', 'protect', 'users', 'team', 'enterprise', 'cloud', 'digital', 'innovation',
+        'evaluate', 'protect', 'users', 'team', 'enterprise', 'cloud', 'digital', 'innovation', 'developer',
 
         # very common business suffixes
         'group', 'company', 'inc', 'inc.', 'llc', 'corp', 'corporation', 'co', 'co.', 
