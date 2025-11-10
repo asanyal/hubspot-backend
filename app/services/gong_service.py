@@ -158,9 +158,9 @@ def filter_filler_words(text: str) -> set:
 
         # industry generic
         'automation', 'business', 'global', 'international', 'technologies', 'technology',
-        'systems', 'solutions', 'services', 'network', 'networks', 'financial', 'capital', 
+        'systems', 'solutions', 'services', 'network', 'networks', 'financial', 'capital',
         'federal', 'holdings', 'associates', 'industries', 'partners', 'consulting',
-        'digital', 'analytics',
+        'digital', 'analytics', 'data',
 
         # suffix add-ons found in your list
         'labs', 'lab', 'studio', 'brands', 'health', 'care', 'ventures', 'markets', 'exchange',
