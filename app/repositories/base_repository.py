@@ -14,9 +14,9 @@ class BaseRepository:
         """Find a single document"""
         return self.collection.find_one(filter_dict)
 
-    def find_many(self, filter_dict: Dict) -> List[Dict]:
-        """Find multiple documents"""
-        return list(self.collection.find(filter_dict))
+    def find_many(self, filter_dict: Dict, projection: Optional[Dict] = None) -> List[Dict]:
+        """Find multiple documents with optional projection"""
+        return list(self.collection.find(filter_dict, projection))
 
     def insert_one(self, document: Dict) -> bool:
         """Insert a single document"""

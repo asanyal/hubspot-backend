@@ -16,6 +16,13 @@ class MeetingInsightsRepository(BaseRepository):
     def get_by_deal_id(self, deal_id: str) -> List[Dict]:
         return self.find_many({"deal_id": deal_id})
 
+    def get_buyer_attendees_by_deal_id(self, deal_id: str) -> List[Dict]:
+        """Get only buyer_attendees field for all meetings of a deal (optimized with projection)"""
+        return self.find_many(
+            {"deal_id": deal_id},
+            projection={"buyer_attendees": 1, "_id": 0}
+        )
+
     def get_by_meeting_id(self, deal_id: str, meeting_id: str) -> Optional[Dict]:
         return self.find_one({"deal_id": deal_id, "meeting_id": meeting_id})
 

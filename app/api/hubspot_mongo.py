@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query, Request, BackgroundTasks
+from fastapi.concurrency import run_in_threadpool
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from collections import Counter
@@ -17,10 +18,83 @@ import queue
 from pydantic import BaseModel
 from app.services.llm_service import ask_openai
 from collections import defaultdict
+import time
 
 init()
 
 router = APIRouter()
+
+# In-memory cache for ultra-fast repeated requests (10 min TTL)
+_endpoint_cache = {}
+_CACHE_TTL = 600  # 10 minutes
+
+# Deal-info specific cache with 24-hour TTL
+_deal_info_cache = {}
+_DEAL_INFO_CACHE_TTL = 86400  # 24 hours in seconds
+
+# Company-overview specific cache with 24-hour TTL
+_company_overview_cache = {}
+_COMPANY_OVERVIEW_CACHE_TTL = 86400  # 24 hours in seconds
+
+# Stakeholders specific cache with 24-hour TTL
+_stakeholders_cache = {}
+_STAKEHOLDERS_CACHE_TTL = 86400  # 24 hours in seconds
+
+def _get_cached(cache_key: str) -> Optional[Any]:
+    """Get value from cache if not expired"""
+    if cache_key in _endpoint_cache:
+        cached_data, timestamp = _endpoint_cache[cache_key]
+        if time.time() - timestamp < _CACHE_TTL:
+            return cached_data
+        else:
+            del _endpoint_cache[cache_key]
+    return None
+
+def _set_cache(cache_key: str, value: Any) -> None:
+    """Set value in cache with current timestamp"""
+    _endpoint_cache[cache_key] = (value, time.time())
+
+def _get_deal_info_cached(deal_name: str) -> Optional[Any]:
+    """Get deal-info from cache if not expired (24-hour TTL)"""
+    if deal_name in _deal_info_cache:
+        cached_data, timestamp = _deal_info_cache[deal_name]
+        if time.time() - timestamp < _DEAL_INFO_CACHE_TTL:
+            return cached_data
+        else:
+            del _deal_info_cache[deal_name]
+    return None
+
+def _set_deal_info_cache(deal_name: str, value: Any) -> None:
+    """Set deal-info in cache with current timestamp (24-hour TTL)"""
+    _deal_info_cache[deal_name] = (value, time.time())
+
+def _get_company_overview_cached(deal_name: str) -> Optional[Any]:
+    """Get company-overview from cache if not expired (24-hour TTL)"""
+    if deal_name in _company_overview_cache:
+        cached_data, timestamp = _company_overview_cache[deal_name]
+        if time.time() - timestamp < _COMPANY_OVERVIEW_CACHE_TTL:
+            return cached_data
+        else:
+            del _company_overview_cache[deal_name]
+    return None
+
+def _set_company_overview_cache(deal_name: str, value: Any) -> None:
+    """Set company-overview in cache with current timestamp (24-hour TTL)"""
+    _company_overview_cache[deal_name] = (value, time.time())
+
+def _get_stakeholders_cached(deal_name: str) -> Optional[Any]:
+    """Get stakeholders from cache if not expired (24-hour TTL)"""
+    if deal_name in _stakeholders_cache:
+        cached_data, timestamp = _stakeholders_cache[deal_name]
+        if time.time() - timestamp < _STAKEHOLDERS_CACHE_TTL:
+            return cached_data
+        else:
+            del _stakeholders_cache[deal_name]
+    return None
+
+def _set_stakeholders_cache(deal_name: str, value: Any) -> None:
+    """Set stakeholders in cache with current timestamp (24-hour TTL)"""
+    _stakeholders_cache[deal_name] = (value, time.time())
 
 class SignalsResponse(BaseModel):
     very_likely_to_buy: int
@@ -111,7 +185,6 @@ async def test_signals():
 @router.get("/stages", response_model=List[Dict[str, Any]])
 async def get_pipeline_stages():
     """Get all pipeline stages from MongoDB"""
-    print(Fore.BLUE + "#### Fetching pipeline stages from MongoDB" + Style.RESET_ALL)
     try:
         # Get all deals from MongoDB
         all_deals = deal_info_repo.get_all_deals()
@@ -141,19 +214,16 @@ async def get_pipeline_stages():
         
         return stages
     except Exception as e:
-        print(Fore.RED + f"Error fetching pipeline stages: {str(e)}" + Style.RESET_ALL)
         raise HTTPException(status_code=500, detail=f"Error fetching pipeline stages: {str(e)}")
 
 @router.get("/deals", response_model=List[Dict[str, Any]])
 async def get_deals_by_stage(stage: str = Query(..., description="The name of the pipeline stage")):
     """Get all deals in a specific pipeline stage from MongoDB"""
-    print(Fore.BLUE + f"#### Fetching deals for stage: '{stage}'" + Style.RESET_ALL)
     try:
         # Query MongoDB for deals in the specified stage
         deals = deal_info_repo.find_many({"stage": stage})
         
         if not deals:
-            print(Fore.RED + f"No deals found for stage: '{stage}'" + Style.RESET_ALL)
             
             # Get available stages to help with debugging
             all_deals = deal_info_repo.get_all_deals()
@@ -161,8 +231,8 @@ async def get_deals_by_stage(stage: str = Query(..., description="The name of th
             
             similar_stages = [s for s in available_stages if s.lower() == stage.lower() or stage.lower() in s.lower()]
             if similar_stages:
-                print(Fore.BLUE + f"Similar stages found: {similar_stages}" + Style.RESET_ALL)
-        
+                pass  # Similar stages found
+
         # Convert MongoDB documents to match v1 API format
         formatted_deals = []
         for deal in deals:
@@ -197,7 +267,6 @@ async def get_deals_by_stage(stage: str = Query(..., description="The name of th
         
         return formatted_deals
     except Exception as e:
-        print(Fore.RED + f"Error in get_deals_by_stage endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching deals: {str(e)}")
@@ -205,7 +274,6 @@ async def get_deals_by_stage(stage: str = Query(..., description="The name of th
 @router.get("/all-deals", response_model=List[Dict[str, Any]])
 async def get_all_deals():
     """Get a list of all deals for dropdown selection"""
-    print(Fore.BLUE + "#### Getting all deals from MongoDB" + Style.RESET_ALL)
     try:
         all_deals = deal_info_repo.get_all_deals()
         
@@ -250,7 +318,6 @@ async def get_deal_timeline(
     dealName: str = Query(..., description="The name of the deal")
 ):
     """Get timeline data for a specific deal"""
-    print(Fore.BLUE + f"#### Getting timeline for deal: {dealName}" + Style.RESET_ALL)
     try:
         # Get deal info first to get the deal_id
         deal_info = deal_info_repo.get_by_deal_id(dealName)
@@ -311,17 +378,23 @@ async def get_deal_timeline(
         
         return response
     except Exception as e:
-        print(Fore.RED + f"Error in deal_timeline endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching deal timeline: {str(e)}")
 
 @router.get("/deal-info", response_model=Dict[str, Any])
 async def get_deal_info(dealName: str = Query(..., description="The name of the deal")):
-    print(Fore.BLUE + f"#### Getting deal info for: {dealName}" + Style.RESET_ALL)
+    print(Fore.BLUE + f"#### deal-info API called for deal: {dealName}" + Style.RESET_ALL)
+
+    # Check cache first (24-hour TTL)
+    cached_result = _get_deal_info_cached(dealName)
+    if cached_result is not None:
+        print(Fore.GREEN + f"[CACHE HIT] deal-info for {dealName} served from 24h cache" + Style.RESET_ALL)
+        return cached_result
+
     try:
-        # Get deal info
-        deal_info = deal_info_repo.get_by_deal_id(dealName)
+        # Get deal info (async to avoid blocking)
+        deal_info = await run_in_threadpool(deal_info_repo.get_by_deal_id, dealName)
         if not deal_info:
             return {
                 "dealId": "Not found",
@@ -330,9 +403,9 @@ async def get_deal_info(dealName: str = Query(..., description="The name of the 
                 "startDate": None,
                 "endDate": None
             }
-            
-        # Get timeline data for activity count and dates
-        timeline_data = deal_timeline_repo.get_by_deal_id(dealName)
+
+        # Get timeline data for activity count and dates (async to avoid blocking)
+        timeline_data = await run_in_threadpool(deal_timeline_repo.get_by_deal_id, dealName)
         
         activity_count = len(timeline_data.get('events', [])) if timeline_data else 0
         start_date = timeline_data.get('start_date') if timeline_data else None
@@ -347,11 +420,15 @@ async def get_deal_info(dealName: str = Query(..., description="The name of the 
             "startDate": start_date,
             "endDate": end_date
         }
-        
+
         # Ensure dealOwner is never an empty dictionary
         if response["dealOwner"] == {}:
             response["dealOwner"] = "Unknown Owner"
-            
+
+        # Cache the response for 24 hours
+        _set_deal_info_cache(dealName, response)
+        print(Fore.YELLOW + f"[CACHE SET] deal-info for {dealName} cached for 24 hours" + Style.RESET_ALL)
+
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching deal info: {str(e)}")
@@ -362,7 +439,6 @@ async def get_contacts_and_champion(
     dealName: str = Query(..., description="The name of the deal"),
     date: str = Query(..., description="The date to search around in YYYY-MM-DD format")
 ):
-    print(Fore.BLUE + f"[{date}] Contacts and champion for deal: {dealName}" + Style.RESET_ALL)
     try:
         # Get meeting info for the deal
         meeting_info = meeting_insights_repo.get_by_deal_id(dealName)
@@ -385,7 +461,6 @@ async def get_contacts_and_champion(
             "champions_count": len(champions)
         }
     except Exception as e:
-        print(Fore.RED + f"Error in contacts-and-champion endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error identifying contacts and champion: {str(e)}")
@@ -394,12 +469,15 @@ async def get_contacts_and_champion(
 async def get_concerns(
     dealName: str = Query(..., description="The name of the deal"),
 ):
-    print(Fore.BLUE + f"#### Getting concerns for deal: {dealName}." + Style.RESET_ALL)
+    print(Fore.BLUE + f"#### get-concerns API called for deal: {dealName}" + Style.RESET_ALL)
+    import time
+    start_time = time.time()
     try:
-        # Get deal insights
-        deal_activity = deal_insights_repo.get_by_deal_id(dealName)
+        # Get deal insights (async to avoid blocking)
+        deal_activity = await run_in_threadpool(deal_insights_repo.get_by_deal_id, dealName)
         if not deal_activity:
-            print(Fore.YELLOW + f"No deal insights found for: {dealName}" + Style.RESET_ALL)
+            end_time = time.time()
+            elapsed_time = end_time - start_time
             # Return structured response with "N/A" values
             return [{
                 "pricing_concerns": {
@@ -418,7 +496,8 @@ async def get_concerns(
 
         concerns = deal_activity.get("concerns", [])
         if not concerns:
-            print(Fore.YELLOW + f"No concerns data found for: {dealName}" + Style.RESET_ALL)
+            end_time = time.time()
+            elapsed_time = end_time - start_time
             # Return structured response with "N/A" values
             return [{
                 "pricing_concerns": {
@@ -442,7 +521,8 @@ async def get_concerns(
         elif isinstance(concerns, list):
             concerns_list = concerns
         else:
-            print(Fore.YELLOW + f"Invalid concerns format for: {dealName}" + Style.RESET_ALL)
+            end_time = time.time()
+            elapsed_time = end_time - start_time
             # Return structured response with "N/A" values
             return [{
                 "pricing_concerns": {
@@ -459,11 +539,11 @@ async def get_concerns(
                 }
             }]
 
-        print(Fore.GREEN + f"Returning {len(concerns_list)} concerns for deal: {dealName}" + Style.RESET_ALL)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
         return concerns_list
 
     except Exception as e:
-        print(Fore.RED + f"Error in get-concerns endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error analyzing call concerns: {str(e)}")
@@ -471,7 +551,6 @@ async def get_concerns(
 @router.get("/deal-activities-count", response_model=Dict[str, int])
 async def get_deal_activities_count(dealName: str = Query(..., description="The name of the deal")):
     """Get the count of activities for a specific deal"""
-    print(Fore.BLUE + f"#### Getting deal activities count for: {dealName}" + Style.RESET_ALL)
     try:
         # Get timeline data
         timeline_data = deal_timeline_repo.get_by_deal_id(dealName)
@@ -484,7 +563,6 @@ async def get_deal_activities_count(dealName: str = Query(..., description="The 
 @router.get("/pipeline-summary", response_model=List[Dict[str, Any]])
 async def get_pipeline_summary():
     """Get a summary of the pipeline with counts and amounts by stage"""
-    print(Fore.BLUE + "#### Get Pipeline Summary" + Style.RESET_ALL)
     try:
         # Get all deals
         all_deals = deal_info_repo.get_all_deals()
@@ -522,7 +600,6 @@ async def get_pipeline_summary():
         
         return summary
     except Exception as e:
-        print(Fore.RED + f"Pipeline summary error: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error creating pipeline summary: {str(e)}")
@@ -530,14 +607,19 @@ async def get_pipeline_summary():
 @router.get("/company-overview", response_model=Dict[str, str])
 async def get_company_overview(dealName: str = Query(..., description="The name of the deal")):
     """Get company overview for a specific deal from MongoDB"""
-    print(Fore.BLUE + f"#### Getting company overview for deal: {dealName}" + Style.RESET_ALL)
-    
+    print(Fore.BLUE + f"#### company-overview API called for deal: {dealName}" + Style.RESET_ALL)
+
+    # Check cache first (24-hour TTL)
+    cached_result = _get_company_overview_cached(dealName)
+    if cached_result is not None:
+        print(Fore.GREEN + f"[CACHE HIT] company-overview for {dealName} served from 24h cache" + Style.RESET_ALL)
+        return cached_result
+
     try:
-        # Get meeting insights from MongoDB
-        meeting_insights = meeting_insights_repo.get_by_deal_id(dealName)
+        # Get meeting insights from MongoDB (async to avoid blocking)
+        meeting_insights = await run_in_threadpool(meeting_insights_repo.get_by_deal_id, dealName)
         
         if not meeting_insights:
-            print(Fore.YELLOW + f"No meeting insights found for deal: {dealName}" + Style.RESET_ALL)
             return {"overview": "-"}
         
         # Sort meeting insights by date with latest first
@@ -556,10 +638,8 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         # Sort by meeting_date in descending order (latest first)
         meeting_insights.sort(key=get_meeting_date, reverse=True)
         
-        print(Fore.BLUE + f"Found {len(meeting_insights)} meetings for deal: {dealName}" + Style.RESET_ALL)
         
         limited_meetings = meeting_insights[:6]
-        print(Fore.BLUE + f"Processing first {len(limited_meetings)} most recent meetings for deal: {dealName}" + Style.RESET_ALL)
         
         all_transcripts = []
         for meeting in limited_meetings:
@@ -568,7 +648,6 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
                 all_transcripts.append(transcript.strip())
         
         if not all_transcripts:
-            print(Fore.YELLOW + f"No transcripts found for deal: {dealName}" + Style.RESET_ALL)
             return {"overview": "-"}
         
         # Concatenate and cap at 10000 characters
@@ -576,7 +655,6 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         if len(combined_transcript) > 10000:
             combined_transcript = combined_transcript[:10000]
         
-        print(Fore.GREEN + f"Combined transcript length: {len(combined_transcript)} characters for deal: {dealName}" + Style.RESET_ALL)
         
         summary_prompt = f"""
         Please summarize the following transcript - conversation between the buyer and seller - in 2-3 lines. 
@@ -584,18 +662,27 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         Focus on the key points in the transcript, any decisions made, any positive or negative signals (less likely to buy, likely to buy). Use gerund phrases. Only return the summary, no other text.
 
         Transcript:
+            pass
         {combined_transcript}
         """
-        
-        summary = ask_openai(
-            user_content=summary_prompt,
-            system_content="You are a sales analyst that creates concise, informative summaries of meeting transcripts. Focus on key business insights and decisions."
+
+        # Make LLM call async to avoid blocking
+        summary = await run_in_threadpool(
+            ask_openai,
+            summary_prompt,
+            "You are a sales analyst that creates concise, informative summaries of meeting transcripts. Focus on key business insights and decisions."
         )
-        
-        return {"overview": summary}
+
+        # Prepare response
+        response = {"overview": summary}
+
+        # Cache the response for 24 hours
+        _set_company_overview_cache(dealName, response)
+        print(Fore.YELLOW + f"[CACHE SET] company-overview for {dealName} cached for 24 hours" + Style.RESET_ALL)
+
+        return response
         
     except Exception as e:
-        print(Fore.RED + f"Error in company-overview endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         # Return a graceful response instead of raising an error
@@ -607,14 +694,12 @@ async def get_signals(deal_name: Optional[str] = Query(None, description="The na
     if not deal_name:
         raise HTTPException(status_code=400, detail="deal_name parameter is required")
     
-    print(Fore.BLUE + f"#### Getting signals for deal: {deal_name}" + Style.RESET_ALL)
     
     try:
         # Get timeline data for the deal
         timeline_data = deal_timeline_repo.get_by_deal_id(deal_name)
         
         if not timeline_data:
-            print(Fore.YELLOW + f"No timeline data found for deal: {deal_name}" + Style.RESET_ALL)
             return {
                 "very_likely_to_buy": 0,
                 "likely_to_buy": 0,
@@ -628,12 +713,10 @@ async def get_signals(deal_name: Optional[str] = Query(None, description="The na
         
         # Loop through events and count meeting signals
         events = timeline_data.get('events', [])
-        print(f"Found {len(events)} events for deal {deal_name}")
         
         for event in events:
             event_type = event.get('event_type', '')
             buyer_intent = event.get('buyer_intent', '')
-            print(f"Event type: {event_type}, Buyer intent: {buyer_intent}")
             
             if event_type == 'Meeting':
                 # Map buyer_intent values to signal keys
@@ -650,11 +733,9 @@ async def get_signals(deal_name: Optional[str] = Query(None, description="The na
             "less_likely_to_buy": less_likely_to_buy
         }
         
-        print(Fore.GREEN + f"Found signals for deal {deal_name}: {result}" + Style.RESET_ALL)
         return result
         
     except Exception as e:
-        print(Fore.RED + f"Error in get-signals endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching signals: {str(e)}")
@@ -662,19 +743,16 @@ async def get_signals(deal_name: Optional[str] = Query(None, description="The na
 @router.post("/get-signals-group")
 async def get_signals_group(deal_names: DealNamesRequest):
     """Get buyer intent signals from meeting events for multiple deals"""
-    print(Fore.BLUE + f"#### Getting signals for {len(deal_names.deal_names)} deals" + Style.RESET_ALL)
     
     try:
         results = {}
         
         for deal_name in deal_names.deal_names:
-            print(Fore.BLUE + f"Processing deal: {deal_name}" + Style.RESET_ALL)
             
             # Get timeline data for the deal
             timeline_data = deal_timeline_repo.get_by_deal_id(deal_name)
             
             if not timeline_data:
-                print(Fore.YELLOW + f"No timeline data found for deal: {deal_name}" + Style.RESET_ALL)
                 results[deal_name] = {
                     "very_likely_to_buy": 0,
                     "likely_to_buy": 0,
@@ -689,7 +767,6 @@ async def get_signals_group(deal_names: DealNamesRequest):
             
             # Loop through events and count meeting signals
             events = timeline_data.get('events', [])
-            print(f"Found {len(events)} events for deal {deal_name}")
             
             for event in events:
                 event_type = event.get('event_type', '')
@@ -711,34 +788,43 @@ async def get_signals_group(deal_names: DealNamesRequest):
             }
             
             results[deal_name] = result
-            print(Fore.GREEN + f"Found signals for deal {deal_name}: {result}" + Style.RESET_ALL)
         
-        print(Fore.GREEN + f"Completed processing {len(results)} deals" + Style.RESET_ALL)
         return results
         
     except Exception as e:
-        print(Fore.RED + f"Error in get-signals-group endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching signals group: {str(e)}")
 
 @router.get("/get-stakeholders")
 async def get_stakeholders(deal_name: str = Query(..., description="The name of the deal")):
-    """Get all stakeholders for a deal with decision maker analysis"""
-    print(Fore.BLUE + f"#### Getting stakeholders for deal: {deal_name}" + Style.RESET_ALL)
-    
+    """Get all stakeholders for a deal with decision maker analysis - OPTIMIZED with parallel processing and caching"""
+    print(Fore.BLUE + f"#### get-stakeholders API called for deal: {deal_name}" + Style.RESET_ALL)
+    start_time = datetime.now()
+
     try:
-        # Get all meeting insights for the deal
-        meeting_insights = meeting_insights_repo.get_by_deal_id(deal_name)
-        
+        # Check cache first (24-hour TTL)
+        cached_result = _get_stakeholders_cached(deal_name)
+        if cached_result is not None:
+            elapsed = (datetime.now() - start_time).total_seconds() * 1000
+            print(Fore.GREEN + f"[CACHE HIT] get-stakeholders for {deal_name} served from 24h cache ({elapsed:.2f}ms)" + Style.RESET_ALL)
+            return cached_result
+
+        # Get all meeting insights for the deal (run in threadpool to avoid blocking)
+        # Use optimized method that only fetches buyer_attendees field
+        db_start = datetime.now()
+        meeting_insights = await run_in_threadpool(meeting_insights_repo.get_buyer_attendees_by_deal_id, deal_name)
+        db_elapsed = (datetime.now() - db_start).total_seconds() * 1000
+
         if not meeting_insights:
-            print(Fore.YELLOW + f"No meeting insights found for deal: {deal_name}" + Style.RESET_ALL)
-            return {"stakeholders": []}
-        
+            result = {"stakeholders": []}
+            _set_cache(cache_key, result)
+            return result
+
         # Collect unique stakeholders using a set
         stakeholders_set = set()
         stakeholders_dict = {}
-        
+
         for meeting in meeting_insights:
             buyer_attendees = meeting.get('buyer_attendees', [])
             for attendee in buyer_attendees:
@@ -746,14 +832,14 @@ async def get_stakeholders(deal_name: str = Query(..., description="The name of 
                 name = attendee.get('name', '')
                 email = attendee.get('email', '')
                 title = attendee.get('title', '')
-                
+
                 # Create unique identifier using email as primary key
                 if email:
                     unique_key = email
                 else:
                     # Fallback to name if no email available
                     unique_key = name
-                
+
                 if unique_key not in stakeholders_set:
                     stakeholders_set.add(unique_key)
                     stakeholders_dict[unique_key] = {
@@ -761,64 +847,104 @@ async def get_stakeholders(deal_name: str = Query(..., description="The name of 
                         "email": email,
                         "title": title
                     }
-        
-        print(Fore.GREEN + f"Found {len(stakeholders_dict)} unique stakeholders for deal {deal_name}" + Style.RESET_ALL)
-        
-        # Analyze each stakeholder for decision maker potential
-        
-        
+
+        extraction_elapsed = (datetime.now() - db_start).total_seconds() * 1000
+
+        # Analyze stakeholders for decision maker potential using PARALLEL processing
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        llm_start = datetime.now()
+
+        def analyze_decision_maker_sync(title: str) -> bool:
+            """Synchronous function to analyze a single title - runs in thread pool"""
+            if not title:
+                return False
+
+            # Check if we've already analyzed this title (title-level cache)
+            title_cache_key = f"decision_maker_title:{title.lower()}"
+            cached_dm_result = _get_cached(title_cache_key)
+            if cached_dm_result is not None:
+                return cached_dm_result
+
+
+            decision_maker_prompt = f"""
+            Analyze if this person is likely to be a decision maker based on their job title.
+
+            Job Title: {title}
+
+            Decision makers are typically:
+                pass
+            - High-level individual contributors (Principal Engineer, Staff Engineer, Architect, etc.)
+            - Management roles (Director, VP, Senior VP, C-suite, Founder, etc.)
+            - People with significant influence over purchasing decisions
+
+            Non-decision makers are typically:
+                pass
+            - Regular software engineers, developers, analysts
+            - Junior or mid-level positions without purchasing authority
+
+            Respond with only "Yes" or "No".
+            """
+
+            try:
+                response = ask_openai(
+                    user_content=decision_maker_prompt,
+                    system_content="You are a sales analyst that determines decision-making authority based on job titles. Respond only with 'Yes' or 'No'."
+                )
+
+                response = response.strip().lower()
+                potential_decision_maker = response in ['yes', 'true', '1']
+
+                # Cache the title analysis result for future use
+                _set_cache(title_cache_key, potential_decision_maker)
+
+                return potential_decision_maker
+
+            except Exception as e:
+                return False
+
+        # Create list of tasks for parallel execution
+        stakeholders_list = list(stakeholders_dict.values())
+
+        # Run all analyses in parallel using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            # Submit all tasks at once
+            futures = [
+                executor.submit(analyze_decision_maker_sync, stakeholder.get('title', ''))
+                for stakeholder in stakeholders_list
+            ]
+
+            # Wait for all to complete and gather results
+            decision_maker_results = [future.result() for future in futures]
+
+        llm_elapsed = (datetime.now() - llm_start).total_seconds() * 1000
+
+        # Combine stakeholders with their analysis results
         stakeholders_with_analysis = []
-        for unique_key, stakeholder in stakeholders_dict.items():
-            title = stakeholder.get('title', '')
-            
-            potential_decision_maker = False
-            if title:
-                decision_maker_prompt = f"""
-                Analyze if this person is likely to be a decision maker based on their job title.
-                
-                Job Title: {title}
-                
-                Decision makers are typically:
-                - High-level individual contributors (Principal Engineer, Staff Engineer, Architect, etc.)
-                - Management roles (Director, VP, Senior VP, C-suite, Founder, etc.)
-                - People with significant influence over purchasing decisions
-                
-                Non-decision makers are typically:
-                - Regular software engineers, developers, analysts
-                - Junior or mid-level positions without purchasing authority
-                
-                Respond with only "Yes" or "No".
-                """
-                
-                try:
-                    response = ask_openai(
-                        user_content=decision_maker_prompt,
-                        system_content="You are a sales analyst that determines decision-making authority based on job titles. Respond only with 'Yes' or 'No'."
-                    )
-                    
-                    response = response.strip().lower()
-                    potential_decision_maker = response in ['yes', 'true', '1']
-                    
-                except Exception as e:
-                    print(Fore.RED + f"Error analyzing decision maker for title '{title}': {str(e)}" + Style.RESET_ALL)
-                    potential_decision_maker = False
-            
+        for stakeholder, is_decision_maker in zip(stakeholders_list, decision_maker_results):
             stakeholder_with_analysis = {
                 "name": stakeholder["name"],
                 "email": stakeholder["email"],
                 "title": stakeholder["title"],
-                "potential_decision_maker": potential_decision_maker
+                "potential_decision_maker": is_decision_maker
             }
-            
             stakeholders_with_analysis.append(stakeholder_with_analysis)
-        
+
+        # Sort by decision maker status (descending) then by name
         stakeholders_with_analysis.sort(key=lambda x: (-x['potential_decision_maker'], x['name'].lower()))
-        
-        print(Fore.GREEN + f"Completed stakeholder analysis for deal {deal_name}. Found {len(stakeholders_with_analysis)} stakeholders." + Style.RESET_ALL)
-        return {"stakeholders": stakeholders_with_analysis}
-        
+
+        elapsed = (datetime.now() - start_time).total_seconds() * 1000
+
+        result = {"stakeholders": stakeholders_with_analysis}
+
+        # Cache the response for 24 hours
+        _set_stakeholders_cache(deal_name, result)
+        print(Fore.YELLOW + f"[CACHE SET] get-stakeholders for {deal_name} cached for 24 hours" + Style.RESET_ALL)
+
+        return result
+
     except Exception as e:
-        print(Fore.RED + f"Error in get-stakeholders endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching stakeholders: {str(e)}")
@@ -841,6 +967,7 @@ async def get_latest_meetings(
         limit: Optional limit on number of results for performance (auto-applied for large ranges)
     
     Returns a list of meetings with the following fields:
+        pass
     - deal_id: The name/ID of the deal
     - deal_stage: The current stage of the deal
     - event_date: The date of the meeting
@@ -849,7 +976,6 @@ async def get_latest_meetings(
     - buyer_intent: The buyer intent signal
     - event_id: The unique event ID
     """
-    print(Fore.BLUE + f"#### Getting latest meetings from the past {days} days" + Style.RESET_ALL)
     
     try:
         start_time = datetime.now()
@@ -858,7 +984,6 @@ async def get_latest_meetings(
         now = datetime.now()
         cutoff_time = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
         
-        print(Fore.YELLOW + f"Date range: {cutoff_time.isoformat()} to {now.isoformat()}" + Style.RESET_ALL)
         
         query_start_time = datetime.now()
         
@@ -872,19 +997,16 @@ async def get_latest_meetings(
             
             if days > 30:
                 # For very large date ranges, use ultra-fast version
-                print(Fore.MAGENTA + f"Using ultra-fast query with limit: {effective_limit}" + Style.RESET_ALL)
                 timeline_results = deal_timeline_repo.get_meetings_with_deal_stages_in_date_range_ultra_fast(
                     cutoff_time, now, effective_limit
                 )
             elif days > 14:
                 # For large date ranges (like 21 days), use simple optimized version
-                print(Fore.YELLOW + f"Using simple optimized query with limit: {effective_limit}" + Style.RESET_ALL)
                 timeline_results = deal_timeline_repo.get_meetings_with_deal_stages_in_date_range_simple(
                     cutoff_time, now, effective_limit
                 )
             else:
                 # For medium date ranges, use optimized paginated version
-                print(Fore.CYAN + f"Using optimized paginated query with limit: {effective_limit}" + Style.RESET_ALL)
                 timeline_results = deal_timeline_repo.get_meetings_with_deal_stages_in_date_range_paginated(
                     cutoff_time, now, effective_limit
                 )
@@ -916,7 +1038,6 @@ async def get_latest_meetings(
             
             query_end_time = datetime.now()
             query_duration = (query_end_time - query_start_time).total_seconds()
-            print(Fore.CYAN + f"Database query completed in {query_duration:.2f} seconds" + Style.RESET_ALL)
         else:
             # Use the original grouped version for smaller datasets
             timeline_results = deal_timeline_repo.get_meetings_with_deal_stages_in_date_range(cutoff_time, now)
@@ -958,12 +1079,9 @@ async def get_latest_meetings(
             meetings.sort(key=lambda x: x['event_date'], reverse=True)
         
         total_duration = (datetime.now() - start_time).total_seconds()
-        print(Fore.GREEN + f"Found {len(meetings)} meetings in the past {days} days using optimized query" + Style.RESET_ALL)
-        print(Fore.GREEN + f"Total request duration: {total_duration:.2f} seconds" + Style.RESET_ALL)
         return meetings
         
     except Exception as e:
-        print(Fore.RED + f"Error in get-latest-meetings endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching latest meetings: {str(e)}")
@@ -971,7 +1089,6 @@ async def get_latest_meetings(
 @router.get("/deal-risk-score")
 async def get_deal_risk_score(deal_name: str = Query(..., description="The name of the deal")):
     """Get risk score and analysis for a specific deal"""
-    print(Fore.BLUE + f"#### Getting risk score for deal: {deal_name}" + Style.RESET_ALL)
     
     try:
         risk_factors = {}
@@ -1176,11 +1293,9 @@ async def get_deal_risk_score(deal_name: str = Query(..., description="The name 
             "deal_name": deal_name
         }
         
-        print(Fore.GREEN + f"Risk score for {deal_name}: {total_risk_score}/100 ({risk_level})" + Style.RESET_ALL)
         return response
         
     except Exception as e:
-        print(Fore.RED + f"Error in deal-risk-score endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error calculating risk score: {str(e)}")
@@ -1189,7 +1304,6 @@ def run_sync_job(job_id: str, deal: Optional[str], stage: Optional[str], epoch0:
     """Background function to run sync operations"""
     try:
         if deal:
-            print(Fore.YELLOW + f"Starting sync job {job_id}: Syncing deal {deal} from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
             sync_service.sync_single_deal(
                 deal_name=deal,
                 epoch0=epoch0
@@ -1198,7 +1312,6 @@ def run_sync_job(job_id: str, deal: Optional[str], stage: Optional[str], epoch0:
             sync_jobs[job_id]["message"] = f"Successfully synced deal: {deal}"
         else:
             stage_to_use = stage if stage else "all"
-            print(Fore.YELLOW + f"Starting sync job {job_id}: Syncing deals from stage {stage_to_use} from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
             sync_service.sync(
                 stage=stage_to_use,
                 epoch0=epoch0
@@ -1206,7 +1319,6 @@ def run_sync_job(job_id: str, deal: Optional[str], stage: Optional[str], epoch0:
             sync_jobs[job_id]["status"] = "completed"
             sync_jobs[job_id]["message"] = f"Successfully synced deals for stage: {stage_to_use}"
     except Exception as e:
-        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
         sync_jobs[job_id]["status"] = "failed"
         sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
         sync_jobs[job_id]["error"] = str(e)
@@ -1225,6 +1337,7 @@ async def sync_data(
     """
     Start a background sync job. Returns immediately with a job ID that can be used to check status.
     Can be used in three ways:
+        pass
     1. Sync all deals from today: /sync
     2. Sync all deals from N days ago: /sync?epoch_days=N
     3. Sync deals from a specific stage: /sync?stage="Stage Name"
@@ -1273,7 +1386,6 @@ async def sync_data(
         }
 
     except Exception as e:
-        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
@@ -1284,11 +1396,9 @@ async def get_sync_status(job_id: str):
     Get the status of a sync job
     """
     if job_id not in sync_jobs:
-        print(Fore.RED + f"Job not found: {job_id}" + Style.RESET_ALL)
         raise HTTPException(status_code=404, detail="Job not found")
     
     job = sync_jobs[job_id]
-    print(Fore.YELLOW + f"Job data: {job}" + Style.RESET_ALL)  # Debug log
     
     try:
         response = {
@@ -1314,12 +1424,9 @@ async def get_sync_status(job_id: str):
                 "stage": job.get("stage")
             })
         
-        print(Fore.GREEN + f"Response: {response}" + Style.RESET_ALL)  # Debug log
         return response
         
     except Exception as e:
-        print(Fore.RED + f"Error processing job status: {str(e)}" + Style.RESET_ALL)
-        print(Fore.RED + f"Job data: {job}" + Style.RESET_ALL)
         raise HTTPException(status_code=500, detail=f"Error processing job status: {str(e)}")
 
 @router.get("/sync/jobs", status_code=200)
@@ -1443,7 +1550,6 @@ async def force_sync_meeting_insights(
         }
 
     except Exception as e:
-        print(Fore.RED + f"Error starting force sync meeting insights job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error starting force sync meeting insights job: {str(e)}")
@@ -1451,7 +1557,6 @@ async def force_sync_meeting_insights(
 def run_force_meeting_insights_job(job_id: str, deal_names: List[str], epoch0: str):
     """Background function to run force sync meeting insights operations"""
     try:
-        print(Fore.YELLOW + f"Starting force sync meeting insights job {job_id}: Syncing {len(deal_names)} deals from {epoch0} to {datetime.now().strftime('%Y-%m-%d')}" + Style.RESET_ALL)
 
         # Convert epoch0 to datetime
         start_date = datetime.strptime(epoch0, "%Y-%m-%d")
@@ -1459,17 +1564,13 @@ def run_force_meeting_insights_job(job_id: str, deal_names: List[str], epoch0: s
         
         for deal_name in deal_names:
             if sync_jobs[job_id].get("cancelled", False):
-                print(Fore.YELLOW + f"Job {job_id} was cancelled. Stopping force sync." + Style.RESET_ALL)
                 sync_jobs[job_id]["status"] = "cancelled"
                 sync_jobs[job_id]["message"] = "Job was cancelled by user"
                 return
                 
-            print(Fore.YELLOW + f"\n### Force Syncing Meeting Insights for: {deal_name} ###" + Style.RESET_ALL)
             
             # First delete all existing meeting insights for this deal
-            print(Fore.YELLOW + f"Deleting existing meeting insights for deal: {deal_name}" + Style.RESET_ALL)
             delete_result = meeting_insights_repo.delete_many({"deal_id": deal_name})
-            print(Fore.GREEN + f"Deleted {delete_result} existing meeting insights documents for {deal_name}" + Style.RESET_ALL)
             
             current_date = start_date
             while current_date <= end_date:
@@ -1477,16 +1578,14 @@ def run_force_meeting_insights_job(job_id: str, deal_names: List[str], epoch0: s
                 try:
                     # Use existing sync_meeting_insights method but with force update
                     sync_service._sync_meeting_insights(deal_name, current_date_str, force_update=True)
-                    print(Fore.GREEN + f"Successfully force updated meeting insights for {deal_name} on {current_date_str}" + Style.RESET_ALL)
                 except Exception as e:
-                    print(Fore.RED + f"Error force updating meeting insights for {deal_name} on {current_date_str}: {str(e)}" + Style.RESET_ALL)
+                    pass  # Error syncing, continue
                 current_date += timedelta(days=1)
         
         sync_jobs[job_id]["status"] = "completed"
         sync_jobs[job_id]["message"] = f"Successfully force synced meeting insights for {len(deal_names)} deals"
         
     except Exception as e:
-        print(Fore.RED + f"Error in force sync meeting insights job {job_id}: {str(e)}" + Style.RESET_ALL)
         sync_jobs[job_id]["status"] = "failed"
         sync_jobs[job_id]["message"] = f"Error force syncing meeting insights: {str(e)}"
         sync_jobs[job_id]["error"] = str(e)
@@ -1497,7 +1596,6 @@ def run_force_meeting_insights_job(job_id: str, deal_names: List[str], epoch0: s
 
 @router.post("/deal-insights-aggregate", response_model=Dict[str, List[str]])
 async def aggregate_deal_insights(deal_names: List[str]):
-    print(Fore.BLUE + f"#### Aggregating deal insights for {len(deal_names)} deals" + Style.RESET_ALL)
     try:
         concern_deals = {
             "pricing_concerns": [],
@@ -1575,7 +1673,6 @@ async def aggregate_deal_insights(deal_names: List[str]):
         return concern_deals
 
     except Exception as e:
-        print(Fore.RED + f"Error in deal-insights-aggregate endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error aggregating deal insights: {str(e)}")
@@ -1583,7 +1680,6 @@ async def aggregate_deal_insights(deal_names: List[str]):
 @router.delete("/delete-deal")
 async def delete_deal(dealName: str = Query(..., description="The name of the deal to delete")):
     """Delete all deal-related data from MongoDB for a specific deal"""
-    print(Fore.BLUE + f"#### Deleting all data for deal: {dealName}" + Style.RESET_ALL)
     try:
         # Delete from each repository
         deal_info_deleted = deal_info_repo.delete_one({"deal_id": dealName})
@@ -1610,7 +1706,6 @@ async def delete_deal(dealName: str = Query(..., description="The name of the de
             }
         }
     except Exception as e:
-        print(Fore.RED + f"Error deleting deal data: {str(e)}" + Style.RESET_ALL)
         raise HTTPException(status_code=500, detail=f"Error deleting deal data: {str(e)}")
 
 @router.delete("/delete-meeting-by-title")
@@ -1621,6 +1716,7 @@ async def delete_meeting_by_title(
     """Delete timeline events with matching meeting title from all deals or a specific deal
     
     This endpoint will:
+        pass
     1. Loop through all deals (or a specific deal) in the deal_timeline collection
     2. Check each event's subject field for an exact match (case-insensitive, trimmed)
     3. Delete matching events from the timeline
@@ -1633,10 +1729,10 @@ async def delete_meeting_by_title(
         dict: Contains count of events deleted and list of affected deals
     """
     if deal:
-        print(Fore.BLUE + f"#### Deleting timeline events with title: '{meeting_title}' from deal: '{deal}'" + Style.RESET_ALL)
+        pass  # Deleting from specific deal
     else:
-        print(Fore.BLUE + f"#### Deleting timeline events with title: '{meeting_title}' from all deals" + Style.RESET_ALL)
-    
+        pass  # Deleting from all deals
+
     try:
         # Normalize the input title for comparison
         normalized_title = meeting_title.strip().lower()
@@ -1680,7 +1776,6 @@ async def delete_meeting_by_title(
                     if event_subject == normalized_title:
                         events_deleted_for_deal += 1
                         total_events_deleted += 1
-                        print(f"  Deleting event from {deal_id}: {event.get('subject', 'No subject')}")
                     else:
                         events_to_keep.append(event)
                 
@@ -1701,12 +1796,10 @@ async def delete_meeting_by_title(
                             "deal_id": deal_id,
                             "events_deleted": events_deleted_for_deal
                         })
-                        print(Fore.GREEN + f"✅ Deleted {events_deleted_for_deal} events from deal: {deal_id}" + Style.RESET_ALL)
                     else:
-                        print(Fore.RED + f"Failed to update timeline for deal: {deal_id}" + Style.RESET_ALL)
-                        
+                        pass  # Failed to update
+
             except Exception as e:
-                print(Fore.RED + f"Error processing deal {deal_id}: {str(e)}" + Style.RESET_ALL)
                 continue
         
         # Prepare response
@@ -1720,13 +1813,11 @@ async def delete_meeting_by_title(
         # Add target deal info if specified
         if deal:
             response["target_deal"] = deal
-            print(Fore.GREEN + f"🎯 Deletion complete: {total_events_deleted} events deleted from deal '{deal}'" + Style.RESET_ALL)
         else:
-            print(Fore.GREEN + f"🎯 Deletion complete: {total_events_deleted} events deleted from {len(affected_deals)} deals" + Style.RESET_ALL)
+            pass
         return response
         
     except Exception as e:
-        print(Fore.RED + f"Error in delete-meeting-by-title endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error deleting meeting events: {str(e)}")
@@ -1735,10 +1826,10 @@ def run_sync_job_v2(job_id: str, date_str: str, stage: str = "all", deal: Option
     """Background function to run sync operations using DataSyncService2"""
     try:
         if deal:
-            print(Fore.YELLOW + f"Starting sync job {job_id}: Syncing specific deal {deal} for date {date_str}" + Style.RESET_ALL)
+            pass
         else:
-            print(Fore.YELLOW + f"Starting sync job {job_id}: Syncing data for date {date_str}, stage: {stage}" + Style.RESET_ALL)
-        
+            pass
+
         sync_service_v2 = DataSyncService2()
         sync_service_v2.sync(date_str, stage, deal)
         
@@ -1749,7 +1840,6 @@ def run_sync_job_v2(job_id: str, date_str: str, stage: str = "all", deal: Option
             sync_jobs[job_id]["status"] = "completed"
             sync_jobs[job_id]["message"] = f"Successfully synced data for date: {date_str}, stage: {stage}"
     except Exception as e:
-        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
         sync_jobs[job_id]["status"] = "failed"
         sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
         sync_jobs[job_id]["error"] = str(e)
@@ -1799,7 +1889,6 @@ async def sync_data_v2(
         }
 
     except Exception as e:
-        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
@@ -1843,7 +1932,6 @@ async def sync_stage_on_date(
         }
 
     except Exception as e:
-        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
@@ -1889,7 +1977,6 @@ async def sync_stage_date_range(
         }
 
     except Exception as e:
-        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
@@ -1933,7 +2020,6 @@ async def sync_deal_on_date(
         }
 
     except Exception as e:
-        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
@@ -1948,6 +2034,7 @@ async def sync_deal_date_range(
     """Sync a specific deal for a date range
     
     This endpoint will:
+        pass
     1. Clear all existing timeline events for the deal within the specified date range
     2. Sync fresh data from HubSpot for each day in the range
     
@@ -1986,7 +2073,6 @@ async def sync_deal_date_range(
         }
 
     except Exception as e:
-        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
@@ -2001,7 +2087,6 @@ def run_sync_stage_on_date(job_id: str, stage: str, date_str: str):
         sync_jobs[job_id]["status"] = "completed"
         sync_jobs[job_id]["message"] = f"Successfully synced stage {stage} for date: {date_str}"
     except Exception as e:
-        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
         sync_jobs[job_id]["status"] = "failed"
         sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
         sync_jobs[job_id]["error"] = str(e)
@@ -2018,7 +2103,6 @@ def run_sync_stage_date_range(job_id: str, stage: str, start_date: str, end_date
         sync_jobs[job_id]["status"] = "completed"
         sync_jobs[job_id]["message"] = f"Successfully synced stage {stage} from {start_date} to {end_date}"
     except Exception as e:
-        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
         sync_jobs[job_id]["status"] = "failed"
         sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
         sync_jobs[job_id]["error"] = str(e)
@@ -2035,7 +2119,6 @@ def run_sync_deal_on_date(job_id: str, deal: str, date_str: str):
         sync_jobs[job_id]["status"] = "completed"
         sync_jobs[job_id]["message"] = f"Successfully synced deal {deal} for date: {date_str}"
     except Exception as e:
-        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
         sync_jobs[job_id]["status"] = "failed"
         sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
         sync_jobs[job_id]["error"] = str(e)
@@ -2052,7 +2135,6 @@ def run_sync_deal_date_range(job_id: str, deal: str, start_date: str, end_date: 
         sync_jobs[job_id]["status"] = "completed"
         sync_jobs[job_id]["message"] = f"Successfully synced deal {deal} from {start_date} to {end_date}"
     except Exception as e:
-        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
         sync_jobs[job_id]["status"] = "failed"
         sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
         sync_jobs[job_id]["error"] = str(e)
@@ -2097,7 +2179,6 @@ async def sync_all_stages_on_date(
         }
 
     except Exception as e:
-        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}")
@@ -2111,7 +2192,6 @@ def run_sync_all_stages_on_date(job_id: str, date_str: str):
         sync_jobs[job_id]["status"] = "completed"
         sync_jobs[job_id]["message"] = f"Successfully synced all stages for date: {date_str}"
     except Exception as e:
-        print(Fore.RED + f"Error in sync job {job_id}: {str(e)}" + Style.RESET_ALL)
         sync_jobs[job_id]["status"] = "failed"
         sync_jobs[job_id]["message"] = f"Error syncing data: {str(e)}"
         sync_jobs[job_id]["error"] = str(e)
@@ -2150,7 +2230,6 @@ async def sync_all_stages_yesterday(background_tasks: BackgroundTasks):
         # Store thread reference for potential cancellation
         active_threads[job_id] = thread
 
-        print(Fore.MAGENTA + f"Syncing all stages for date: {date_str}" + Style.RESET_ALL)
 
         return {
             "status": "accepted",
@@ -2159,7 +2238,6 @@ async def sync_all_stages_yesterday(background_tasks: BackgroundTasks):
         }
 
     except Exception as e:
-        print(Fore.RED + f"Error starting sync job: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error starting sync job: {str(e)}") 
@@ -2168,7 +2246,6 @@ async def sync_all_stages_yesterday(background_tasks: BackgroundTasks):
 async def get_deal_owner_performance(deal_owner: Optional[str] = Query(None, description="The name of the deal owner (optional)")):
     """Get deal owner performance data from MongoDB"""
     if deal_owner:
-        print(Fore.BLUE + f"#### Getting performance data for deal owner: {deal_owner}" + Style.RESET_ALL)
         try:
             # Fetch the performance data for the specified deal owner
             performance_data = deal_owner_performance_repo.find_one({"owner": deal_owner})
@@ -2184,10 +2261,8 @@ async def get_deal_owner_performance(deal_owner: Optional[str] = Query(None, des
 
             return performance_data
         except Exception as e:
-            print(Fore.RED + f"Error fetching deal owner performance data: {str(e)}" + Style.RESET_ALL)
             raise HTTPException(status_code=500, detail=f"Error fetching performance data: {str(e)}")
     else:
-        print(Fore.BLUE + "#### Getting performance data for all deal owners" + Style.RESET_ALL)
         try:
             # Fetch all deal owner performance data
             all_performance_data = deal_owner_performance_repo.find_many({})
@@ -2206,13 +2281,11 @@ async def get_deal_owner_performance(deal_owner: Optional[str] = Query(None, des
 
             return result
         except Exception as e:
-            print(Fore.RED + f"Error fetching all deal owner performance data: {str(e)}" + Style.RESET_ALL)
             raise HTTPException(status_code=500, detail=f"Error fetching performance data: {str(e)}")
 
 @router.post("/sync-deal-owner-performance", status_code=202)
 async def sync_deal_owner_performance_endpoint(background_tasks: BackgroundTasks):
     """Invoke the sync of deal owner performance data"""
-    print(Fore.BLUE + "#### Invoking sync for deal owner performance data" + Style.RESET_ALL)
     try:
         # Run the sync operation in the background
         background_tasks.add_task(sync_service_v2.sync_deal_owner_performance)
@@ -2222,7 +2295,6 @@ async def sync_deal_owner_performance_endpoint(background_tasks: BackgroundTasks
             "message": "Sync job for deal owner performance started"
         }
     except Exception as e:
-        print(Fore.RED + f"Error invoking sync for deal owner performance: {str(e)}" + Style.RESET_ALL)
         raise HTTPException(status_code=500, detail=f"Error invoking sync: {str(e)}")
 
 @router.post("/health-scores", status_code=200)
@@ -2232,6 +2304,7 @@ async def get_deal_owner_performance_health_buckets_post(request: HealthScoresRe
     This is the preferred endpoint for complex queries with stage filtering.
     
     Example request body:
+        pass
     {
         "start_date": "1 Jul 2025",
         "end_date": "1 Sep 2025",
@@ -2256,15 +2329,13 @@ async def get_deal_owner_performance_health_buckets_get(
     parsed_stage_names = None
     if stage_names:
         parsed_stage_names = [name.strip() for name in stage_names.split(',') if name.strip()]
-        print(Fore.BLUE + f"Parsed comma-separated stage_names: {parsed_stage_names}" + Style.RESET_ALL)
     
     return await _get_health_scores_internal(start_date, end_date, parsed_stage_names)
 
 async def _get_health_scores_internal(start_date: str, end_date: str, stage_names: Optional[List[str]]):
     """Internal function to handle health scores logic for both GET and POST endpoints"""
-    print(Fore.BLUE + f"#### Getting health scores for date range: {start_date} to {end_date}" + Style.RESET_ALL)
     if stage_names:
-        print(Fore.BLUE + f"Filtering by stages: {stage_names}" + Style.RESET_ALL)
+        pass
     try:
         # Parse and validate dates
         def parse_date(date_str):
@@ -2292,14 +2363,11 @@ async def _get_health_scores_internal(start_date: str, end_date: str, stage_name
         start_dt = adjust_to_monday(original_start_dt)
         end_dt = adjust_to_friday(original_end_dt)
         
-        print(Fore.CYAN + f"Adjusted dates: {original_start_dt.strftime('%d %b %Y')} -> {start_dt.strftime('%d %b %Y')}, "
-              f"{original_end_dt.strftime('%d %b %Y')} -> {end_dt.strftime('%d %b %Y')}" + Style.RESET_ALL)
         
         # Calculate number of complete weeks
         total_days = (end_dt - start_dt).days + 1
         num_weeks = total_days // 7
         
-        print(Fore.YELLOW + f"Total days: {total_days}, Number of weeks: {num_weeks}" + Style.RESET_ALL)
         
         # Signal type mappings - define these before filtering logic
         positive_signals = {"likely to buy", "very likely to buy"}
@@ -2310,7 +2378,6 @@ async def _get_health_scores_internal(start_date: str, end_date: str, stage_name
         # Optimized stage filtering: build deal-stage mapping only if needed
         deal_stage_mapping = {}
         if stage_names:
-            print(Fore.BLUE + f"Building deal-stage mapping for filtering by stages: {stage_names}" + Style.RESET_ALL)
             
             # First, let's see what stages exist in the database
             all_stages_pipeline = [
@@ -2324,7 +2391,6 @@ async def _get_health_scores_internal(start_date: str, end_date: str, stage_name
             for stage_doc in all_stages_cursor:
                 available_stages.append(stage_doc["_id"])
             
-            print(Fore.CYAN + f"Available stages in database: {available_stages[:10]}" + Style.RESET_ALL)  # Show first 10
             
             # Use projection to only fetch deal_name and stage fields
             pipeline = [
@@ -2353,15 +2419,10 @@ async def _get_health_scores_internal(start_date: str, end_date: str, stage_name
                     
                     # Debug first few non-matches
                     if not stage_match and len(deal_stage_mapping) < 5:
-                        print(Fore.YELLOW + f"No match for deal '{deal_name}' with stage '{stage}'" + Style.RESET_ALL)
+                        pass
             
-            print(Fore.BLUE + f"Checked {total_deals_checked} deals, found {matched_deals} deals in target stages" + Style.RESET_ALL)
-            print(Fore.BLUE + f"Deal-stage mapping size: {len(deal_stage_mapping)}" + Style.RESET_ALL)
             
             if not deal_stage_mapping:
-                print(Fore.YELLOW + "No deals found in specified stages, returning empty buckets" + Style.RESET_ALL)
-                print(Fore.YELLOW + f"Target stages: {stage_names}" + Style.RESET_ALL)
-                print(Fore.YELLOW + f"Sample available stages: {available_stages[:5]}" + Style.RESET_ALL)
                 return {"buckets": []}
         
         # Use defaultdict for automatic initialization
@@ -2401,7 +2462,7 @@ async def _get_health_scores_internal(start_date: str, end_date: str, stage_name
                     if stage_names and deal_name not in deal_stage_mapping:
                         # Debug: show first few mismatches
                         if filtered_deals_processed < 3:
-                            print(Fore.YELLOW + f"Performance deal '{deal_name}' not in stage mapping" + Style.RESET_ALL)
+                            pass
                         continue
                     
                     filtered_deals_processed += 1
@@ -2433,18 +2494,12 @@ async def _get_health_scores_internal(start_date: str, end_date: str, stage_name
                             # Skip invalid dates silently for better performance
                             continue
         
-        print(Fore.GREEN + f"Processed {processed_docs} performance documents" + Style.RESET_ALL)
-        print(Fore.GREEN + f"Found {len(performance_deals_found)} unique deals in performance data" + Style.RESET_ALL)
-        print(Fore.GREEN + f"Processed {filtered_deals_processed} deals after stage filtering" + Style.RESET_ALL)
         
         # Debug: show overlap between performance deals and stage mapping
         if stage_names and deal_stage_mapping:
             overlap = performance_deals_found.intersection(set(deal_stage_mapping.keys()))
-            print(Fore.CYAN + f"Overlap between performance deals and stage mapping: {len(overlap)} deals" + Style.RESET_ALL)
             if len(overlap) < 5:
-                print(Fore.CYAN + f"Sample overlap deals: {list(overlap)[:5]}" + Style.RESET_ALL)
-                print(Fore.CYAN + f"Sample performance deals: {list(performance_deals_found)[:5]}" + Style.RESET_ALL)
-                print(Fore.CYAN + f"Sample stage mapping deals: {list(deal_stage_mapping.keys())[:5]}" + Style.RESET_ALL)
+                pass
         
         # Build final weekly buckets
         buckets = []
@@ -2472,11 +2527,9 @@ async def _get_health_scores_internal(start_date: str, end_date: str, stage_name
                 "ratio": ratio
             })
         
-        print(Fore.GREEN + f"Generated {len(buckets)} weekly buckets with health scores" + Style.RESET_ALL)
         return {"buckets": buckets}
         
     except Exception as e:
-        print(Fore.RED + f"Error in health-scores endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error calculating health scores: {str(e)}")

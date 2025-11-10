@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import hubspot, hubspot_mongo
 from app.middleware.session_middleware import SessionMiddleware
 from app.middleware.response_middleware import ResponseMiddleware
+from app.middleware.performance_middleware import PerformanceMiddleware
 
 app = FastAPI(title="HubSpot CRM API")
 
@@ -22,6 +23,9 @@ app.add_middleware(
     expose_headers=["*"],
     max_age=3600,  # Cache preflight requests for 1 hour
 )
+
+# Add performance tracking middleware (first to measure total time)
+app.add_middleware(PerformanceMiddleware)
 
 # Add session middleware
 app.add_middleware(SessionMiddleware)
@@ -44,10 +48,13 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port,
         reload=False,       # Turn off reload in production
-        workers=1,          # Heroku dynos don't need 8 workers unless you're using gunicorn
-        loop="uvloop",
-        limit_concurrency=1000,
-        backlog=2048,
-        timeout_keep_alive=30,
-        access_log=True
+        workers=1,          # Single worker with async is efficient
+        loop="uvloop",      # uvloop for better async performance
+        limit_concurrency=1000,  # Allow up to 1000 concurrent requests
+        backlog=2048,       # Queue size for pending connections
+        timeout_keep_alive=75,  # Keep connections alive longer
+        access_log=False,   # Disable for better performance (enable for debugging)
+        # Performance optimizations
+        limit_max_requests=10000,  # Restart worker after 10k requests to prevent memory leaks
+        h11_max_incomplete_event_size=16384,  # Increase buffer size
     )

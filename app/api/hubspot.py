@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Request
+from fastapi.concurrency import run_in_threadpool
 from typing import List, Dict, Any, Optional
 from app.services.hubspot_service import HubspotService
 from app.services.gong_service import GongService
@@ -33,6 +34,8 @@ from app.utils.transcript_utils import (
 from app.services.openai_service import get_embeddings
 import numpy as np
 from app.services.conversation_context import ConversationContextService
+from app.repositories.deal_timeline_repository import DealTimelineRepository
+from app.repositories.deal_info_repository import DealInfoRepository
 
 init()
 
@@ -41,8 +44,30 @@ hubspot_service = HubspotService()
 session_service = SessionService()
 gong_service = GongService()  # Create a global instance
 
+# Initialize MongoDB repositories for fast data access
+deal_timeline_repo = DealTimelineRepository()
+deal_info_repo = DealInfoRepository()
+
 # Store ongoing requests by browser ID
 ongoing_requests = {}
+
+# In-memory cache for ultra-fast repeated requests (10 min TTL)
+_endpoint_cache = {}
+_CACHE_TTL = 600  # 10 minutes
+
+def _get_cached(cache_key: str) -> Optional[Any]:
+    """Get value from cache if not expired"""
+    if cache_key in _endpoint_cache:
+        cached_data, timestamp = _endpoint_cache[cache_key]
+        if time.time() - timestamp < _CACHE_TTL:
+            return cached_data
+        else:
+            del _endpoint_cache[cache_key]
+    return None
+
+def _set_cache(cache_key: str, value: Any) -> None:
+    """Set value in cache with current timestamp"""
+    _endpoint_cache[cache_key] = (value, time.time())
 
 # Thread pool for background tasks
 # Increased from 4 to 8 workers for better throughput
@@ -190,28 +215,164 @@ async def get_all_deals():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching deals: {str(e)}")
 
+def _get_deal_info_sync(dealName: str) -> Dict[str, Any]:
+    """Synchronous helper function for get_deal_info with all blocking calls"""
+    service = HubspotService()
+    deal_owner = "Unknown"
+    all_deals = service.get_all_deals()
+    deal_id = None
+
+    # Find the deal
+    for deal in all_deals:
+        deal_name = deal.get('dealname')
+        if deal_name and deal_name.strip() == dealName.strip():
+            deal_id = deal.get('dealId')
+            deal_owner = deal.get('owner', "Unknown")
+            break
+
+    if not deal_id:
+        print(Fore.RED + f"Deal not found: {dealName}" + Style.RESET_ALL)
+        return {
+            "dealId": "Not found",
+            "dealOwner": "Not found",
+            "activityCount": 0,
+            "startDate": None,
+            "endDate": None
+        }
+
+    engagement_url = f"https://api.hubapi.com/crm/v3/objects/deals/{deal_id}/associations/engagements"
+    engagement_response = requests.get(engagement_url, headers=service.headers)
+    deal_stage = deal.get('stage', "Unknown")
+
+    if engagement_response.status_code != 200:
+        return {
+            "dealId": deal_id,
+            "dealOwner": deal_owner,
+            "dealStage": deal_stage,
+            "activityCount": 0,
+            "startDate": None,
+            "endDate": None
+        }
+
+    # Get engagement IDs
+    engagement_results = engagement_response.json().get("results", [])
+    engagement_ids = [result.get("id") for result in engagement_results]
+    activity_count = len(engagement_ids)
+
+    # Find start and end dates
+    start_date = None
+    end_date = None
+
+    # Fetch details for each engagement to find dates
+    if engagement_ids:
+        dates = []
+        for eng_id in engagement_ids:
+            detail_url = f"https://api.hubapi.com/crm/v3/objects/engagements/{eng_id}"
+            detail_response = requests.get(detail_url, headers=service.headers, params={
+                "properties": "hs_timestamp"
+            })
+
+            if detail_response.status_code == 200:
+                props = detail_response.json().get("properties", {})
+                timestamp = props.get("hs_timestamp")
+
+                if timestamp:
+                    try:
+                        # Try to parse timestamp
+                        date_time = parse_date(timestamp)
+                        if date_time:
+                            dates.append(date_time)
+                    except:
+                        pass
+
+        if dates:
+            start_date = min(dates).strftime('%Y-%m-%d')
+            end_date = max(dates).strftime('%Y-%m-%d')
+
+    return {
+        "dealId": deal_id,
+        "dealOwner": deal_owner,
+        "dealStage": deal_stage,
+        "activityCount": activity_count,
+        "startDate": start_date,
+        "endDate": end_date
+    }
+
+def _format_mongodb_timeline(timeline_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Format MongoDB timeline data to match API response format"""
+    if not timeline_data or 'events' not in timeline_data:
+        return {"events": [], "start_date": None, "end_date": None}
+
+    events = timeline_data.get('events', [])
+
+    # Calculate start and end dates
+    dates = []
+    for event in events:
+        event_date = event.get('event_date')
+        if event_date:
+            if isinstance(event_date, str):
+                try:
+                    dates.append(datetime.fromisoformat(event_date.replace('Z', '+00:00')))
+                except:
+                    pass
+            elif isinstance(event_date, datetime):
+                dates.append(event_date)
+
+    start_date = min(dates).isoformat() if dates else None
+    end_date = max(dates).isoformat() if dates else None
+
+    return {
+        "events": events,
+        "start_date": start_date,
+        "end_date": end_date,
+        "deal_id": timeline_data.get('deal_id')
+    }
+
 @router.get("/deal-timeline", response_model=Dict[str, Any])
 async def get_deal_timeline(
     request: Request,
     dealName: str = Query(..., description="The name of the deal")
 ):
-    """Get timeline data for a specific deal"""
+    """Get timeline data for a specific deal - OPTIMIZED with MongoDB + cache"""
     print(Fore.BLUE + f"#### Getting timeline for deal: {dealName}" + Style.RESET_ALL)
+    start_time = time.time()
+
     try:
-        # measure the time it takes to get the timeline data
-        start_time = time.time()
-        timeline_data = hubspot_service.get_deal_timeline(dealName)
-        end_time = time.time()
-        print(Fore.BLUE + f"[GetDealTimeline] Took: {end_time - start_time} s" + Style.RESET_ALL)
-        
+        cache_key = f"timeline:{dealName}"
+
+        # 1. Check in-memory cache first (fastest - ~0.001ms)
+        cached_result = _get_cached(cache_key)
+        if cached_result is not None:
+            end_time = time.time()
+            print(Fore.GREEN + f"[CACHE HIT] deal-timeline took: {(end_time - start_time)*1000:.2f} ms" + Style.RESET_ALL)
+            return cached_result
+
+        # 2. Try MongoDB (fast - ~10-30ms)
+        timeline_data = await run_in_threadpool(deal_timeline_repo.get_by_deal_id, dealName)
+        if timeline_data and 'events' in timeline_data:
+            result = _format_mongodb_timeline(timeline_data)
+            _set_cache(cache_key, result)
+            end_time = time.time()
+            event_count = len(result.get('events', []))
+            print(Fore.CYAN + f"[MONGODB] deal-timeline took: {(end_time - start_time)*1000:.2f} ms. Got {event_count} events" + Style.RESET_ALL)
+            return result
+
+        # 3. Fallback to HubSpot API (slower - ~1000-5000ms)
+        print(Fore.YELLOW + f"[FALLBACK] MongoDB data not found, using HubSpot API for: {dealName}" + Style.RESET_ALL)
+        timeline_data = await run_in_threadpool(hubspot_service.get_deal_timeline, dealName)
+
         # Check for error key in the response
         if "error" in timeline_data:
             print(Fore.RED + f"Error in timeline data: {timeline_data['error']}" + Style.RESET_ALL)
             raise HTTPException(status_code=500, detail=f"Error fetching timeline: {timeline_data['error']}")
 
+        _set_cache(cache_key, timeline_data)
+        end_time = time.time()
+        event_count = len(timeline_data.get('events', []))
+        print(Fore.YELLOW + f"[API] deal-timeline took: {(end_time - start_time)*1000:.2f} ms. Got {event_count} events" + Style.RESET_ALL)
         return timeline_data
+
     except HTTPException:
-        # Re-raise HTTP exceptions
         raise
     except Exception as e:
         print(Fore.RED + f"Unexpected error in deal_timeline endpoint: {str(e)}" + Style.RESET_ALL)
@@ -223,107 +384,53 @@ async def get_deal_timeline(
 async def get_deal_info(dealName: str = Query(..., description="The name of the deal")):
     print(Fore.BLUE + f"#### Getting deal info for: {dealName}" + Style.RESET_ALL)
     try:
-        service = HubspotService()
-        deal_owner = "Unknown"
         start_time = time.time()
-        all_deals = service.get_all_deals()
+        # Run all blocking HubSpot API calls in threadpool to avoid blocking event loop
+        result = await run_in_threadpool(_get_deal_info_sync, dealName)
         end_time = time.time()
-        print(Fore.BLUE + f"Fetched {len(all_deals)} deals. Took: {end_time - start_time} s" + Style.RESET_ALL)
-        deal_id = None
-        
-        # Find the deal
-        for deal in all_deals:
-            deal_name = deal.get('dealname')
-
-            if deal_name.strip() == dealName.strip():
-                deal_id = deal.get('dealId')
-                deal_owner = deal.get('owner', "Unknown")
-                break
-        
-        if not deal_id:
-            print(Fore.RED + f"Deal not found: {dealName}" + Style.RESET_ALL)
-            return {
-                "dealId": "Not found",
-                "dealOwner": "Not found",
-                "activityCount": 0,
-                "startDate": None,
-                "endDate": None
-            }
-        engagement_url = f"https://api.hubapi.com/crm/v3/objects/deals/{deal_id}/associations/engagements"
-        engagement_response = requests.get(engagement_url, headers=service.headers)
-        deal_stage = deal.get('stage', "Unknown")
-        
-        if engagement_response.status_code != 200:
-            return {
-                "dealId": deal_id,
-                "dealOwner": deal_owner,
-                "dealStage": deal_stage,
-                "activityCount": 0,
-                "startDate": None,
-                "endDate": None
-            }
-
-        # Get engagement IDs
-        engagement_results = engagement_response.json().get("results", [])
-        engagement_ids = [result.get("id") for result in engagement_results]
-        activity_count = len(engagement_ids)
-
-        
-        # Find start and end dates
-        start_date = None
-        end_date = None
-        
-        # Fetch details for each engagement to find dates
-        if engagement_ids:
-            dates = []
-            for eng_id in engagement_ids:
-                detail_url = f"https://api.hubapi.com/crm/v3/objects/engagements/{eng_id}"
-                detail_response = requests.get(detail_url, headers=service.headers, params={
-                    "properties": "hs_timestamp"
-                })
-                
-                if detail_response.status_code == 200:
-                    props = detail_response.json().get("properties", {})
-                    timestamp = props.get("hs_timestamp")
-                    
-                    if timestamp:
-                        try:
-                            # Try to parse timestamp
-                            date_time = parse_date(timestamp)
-                            if date_time:
-                                dates.append(date_time)
-                        except:
-                            pass
-            
-            if dates:
-                start_date = min(dates).strftime('%Y-%m-%d')
-                end_date = max(dates).strftime('%Y-%m-%d')
-        
-        return {
-            "dealId": deal_id,
-            "dealOwner": deal_owner,
-            "dealStage": deal_stage,
-            "activityCount": activity_count,
-            "startDate": start_date,
-            "endDate": end_date
-        }
+        print(Fore.BLUE + f"Fetched deal info. Took: {end_time - start_time} s" + Style.RESET_ALL)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching deal info: {str(e)}")
 
 @router.get("/deal-activities-count", response_model=Dict[str, int])
 async def get_deal_activities_count(dealName: str = Query(..., description="The name of the deal")):
-    """Get the count of activities for a specific deal"""
+    """Get the count of activities for a specific deal - OPTIMIZED with MongoDB + cache"""
     print(Fore.BLUE + f"#### Getting deal activities count for: {dealName}" + Style.RESET_ALL)
-    try:
-        service = HubspotService()
-        # measure the time it takes to get the deal activities count
-        start_time = time.time()
-        activity_count = service.get_deal_activities_count(dealName)
-        end_time = time.time()
-        print(Fore.BLUE + f"[PERFORMANCE][deal-activities-count] Time took: {end_time - start_time} s. Got {activity_count} activities for deal: {dealName}" + Style.RESET_ALL)
+    start_time = time.time()
 
-        return {"count": activity_count}
+    try:
+        cache_key = f"activities_count:{dealName}"
+
+        # 1. Check in-memory cache first (fastest - ~0.001ms)
+        cached_result = _get_cached(cache_key)
+        if cached_result is not None:
+            end_time = time.time()
+            print(Fore.GREEN + f"[CACHE HIT] deal-activities-count took: {(end_time - start_time)*1000:.2f} ms" + Style.RESET_ALL)
+            return cached_result
+
+        # 2. Try MongoDB (fast - ~5-20ms)
+        timeline_data = await run_in_threadpool(deal_timeline_repo.get_by_deal_id, dealName)
+        if timeline_data and 'events' in timeline_data:
+            activity_count = len(timeline_data['events'])
+            result = {"count": activity_count}
+            _set_cache(cache_key, result)
+            end_time = time.time()
+            print(Fore.CYAN + f"[MONGODB] deal-activities-count took: {(end_time - start_time)*1000:.2f} ms. Got {activity_count} activities" + Style.RESET_ALL)
+            return result
+
+        # 3. Fallback to HubSpot API (slower - ~500-2000ms)
+        print(Fore.YELLOW + f"[FALLBACK] MongoDB data not found, using HubSpot API for: {dealName}" + Style.RESET_ALL)
+        service = HubspotService()
+        activity_count = await run_in_threadpool(service.get_deal_activities_count, dealName)
+        result = {"count": activity_count}
+        _set_cache(cache_key, result)
+        end_time = time.time()
+        print(Fore.YELLOW + f"[API] deal-activities-count took: {(end_time - start_time)*1000:.2f} ms. Got {activity_count} activities" + Style.RESET_ALL)
+        return result
+
     except Exception as e:
+        print(Fore.RED + f"Error in deal-activities-count: {str(e)}" + Style.RESET_ALL)
         raise HTTPException(status_code=500, detail=f"Error fetching deal activities count: {str(e)}")
 
 class ChampionResponse(BaseModel):
@@ -514,6 +621,46 @@ async def delete_browser_cache(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error deleting browser cache: {str(e)}")
+
+@router.get("/cache-stats")
+async def get_cache_stats():
+    """Get statistics about the endpoint cache"""
+    try:
+        current_time = time.time()
+        cache_entries = []
+
+        for key, (value, timestamp) in _endpoint_cache.items():
+            age_seconds = current_time - timestamp
+            time_remaining = _CACHE_TTL - age_seconds
+            cache_entries.append({
+                "key": key,
+                "age_seconds": round(age_seconds, 2),
+                "time_remaining_seconds": round(time_remaining, 2),
+                "is_expired": time_remaining <= 0
+            })
+
+        return {
+            "total_entries": len(_endpoint_cache),
+            "cache_ttl_seconds": _CACHE_TTL,
+            "entries": cache_entries
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting cache stats: {str(e)}")
+
+@router.delete("/clear-endpoint-cache")
+async def clear_endpoint_cache():
+    """Clear the in-memory endpoint cache for deal-timeline and deal-activities-count"""
+    try:
+        cache_size = len(_endpoint_cache)
+        _endpoint_cache.clear()
+        print(Fore.MAGENTA + f"[CACHE] Cleared {cache_size} endpoint cache entries" + Style.RESET_ALL)
+        return {
+            "message": f"Successfully cleared endpoint cache",
+            "entries_cleared": cache_size
+        }
+    except Exception as e:
+        print(Fore.RED + f"[CACHE] Error clearing endpoint cache: {str(e)}" + Style.RESET_ALL)
+        raise HTTPException(status_code=500, detail=f"Error clearing cache: {str(e)}")
 
 @router.delete("/clear-all-cache/{browser_id}")
 async def clear_all_cache(
