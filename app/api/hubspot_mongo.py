@@ -637,10 +637,14 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         
         # Sort by meeting_date in descending order (latest first)
         meeting_insights.sort(key=get_meeting_date, reverse=True)
-        
-        
+
+
         limited_meetings = meeting_insights[:6]
-        
+
+        # Skip OpenAI call if no meetings/activities fetched
+        if not limited_meetings:
+            return {"overview": "-"}
+
         all_transcripts = []
         for meeting in limited_meetings:
             transcript = meeting.get('transcript', '')
