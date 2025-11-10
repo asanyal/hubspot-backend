@@ -145,7 +145,7 @@ def filter_filler_words(text: str) -> set:
         'itself', 'ourselves', 'yourselves', 'themselves',
         'call', 'meeting', 'demo', 'discussion', 'talk', 'chat', 'conversation',
         'zoom', 'teams', 'webex', 'google', 'meet', 'video', 'audio', 'phone',
-        'schedule', 'scheduled', 'calendar', 'invite', 'invitation', 'join',
+        'schedule', 'scheduled', 'calendar', 'invite', 'invitation', 'join', 'connect',
         'gong', 'recording', 'transcript', 'session', 'webinar', 'presentation', 'bank',
 
         # generic AI/product words
