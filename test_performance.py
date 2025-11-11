@@ -121,7 +121,7 @@ if __name__ == "__main__":
                      "Deal Activities Count Endpoint")
 
         test_endpoint("/deal-timeline", {"dealName": DEAL_NAME},
-                     "Deal Timeline Endpoint")
+                     "Timeline Endpoint")
 
         # Test concurrent execution
         test_concurrent_requests()

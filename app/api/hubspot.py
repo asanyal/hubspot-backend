@@ -378,7 +378,7 @@ async def get_deal_timeline(
         print(Fore.RED + f"Unexpected error in deal_timeline endpoint: {str(e)}" + Style.RESET_ALL)
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error fetching deal timeline: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching timeline: {str(e)}")
 
 @router.get("/deal-info", response_model=Dict[str, Any])
 async def get_deal_info(dealName: str = Query(..., description="The name of the deal")):

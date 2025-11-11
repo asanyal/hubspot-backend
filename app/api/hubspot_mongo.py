@@ -380,7 +380,7 @@ async def get_deal_timeline(
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error fetching deal timeline: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching timeline: {str(e)}")
 
 @router.get("/deal-info", response_model=Dict[str, Any])
 async def get_deal_info(dealName: str = Query(..., description="The name of the deal")):
@@ -671,21 +671,30 @@ async def get_company_overview(dealName: str = Query(..., description="The name 
         """
 
         # Make LLM call async to avoid blocking
-        summary = await run_in_threadpool(
-            ask_openai,
-            summary_prompt,
-            "You are a sales analyst that creates concise, informative summaries of meeting transcripts. Focus on key business insights and decisions."
-        )
+        try:
+            summary = await run_in_threadpool(
+                ask_openai,
+                summary_prompt,
+                "You are a sales analyst that creates concise, informative summaries of meeting transcripts. Focus on key business insights and decisions."
+            )
 
-        # Prepare response
-        response = {"overview": summary}
+            # Prepare response
+            response = {"overview": summary}
 
-        # Cache the response for 24 hours
-        _set_company_overview_cache(dealName, response)
-        print(Fore.YELLOW + f"[CACHE SET] company-overview for {dealName} cached for 24 hours" + Style.RESET_ALL)
+            # Cache the response for 24 hours only if LLM call succeeded
+            _set_company_overview_cache(dealName, response)
+            print(Fore.YELLOW + f"[CACHE SET] company-overview for {dealName} cached for 24 hours" + Style.RESET_ALL)
 
-        return response
-        
+            return response
+
+        except Exception as llm_error:
+            # Don't cache if LLM call fails
+            print(Fore.RED + f"LLM call failed for company-overview: {str(llm_error)}" + Style.RESET_ALL)
+            import traceback
+            traceback.print_exc()
+            # Return a graceful response without caching
+            return {"overview": "Error generating summary from meeting transcripts"}
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1103,7 +1112,7 @@ async def get_deal_risk_score(deal_name: str = Query(..., description="The name 
         deal_insights = deal_insights_repo.get_by_deal_id(deal_name)
         data_sources["deal_insights"] = deal_insights
         
-        # 2. Get Deal Timeline
+        # 2. Get Timeline
         timeline_data = deal_timeline_repo.get_by_deal_id(deal_name)
         data_sources["timeline_events"] = timeline_data
         
