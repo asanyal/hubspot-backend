@@ -149,7 +149,7 @@ def filter_filler_words(text: str) -> set:
         'gong', 'recording', 'transcript', 'session', 'webinar', 'presentation', 'bank',
 
         # generic AI/product words
-        'ai', 'land', 'platform', 'monitor', 'observe', 'genai', 'gen', 'generative',
+        'ai', 'al', 'land', 'platform', 'monitor', 'observe', 'genai', 'gen', 'generative',
         'evaluate', 'protect', 'users', 'team', 'enterprise', 'cloud', 'digital', 'innovation', 'developer',
 
         # very common business suffixes
