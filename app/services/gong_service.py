@@ -160,7 +160,7 @@ def filter_filler_words(text: str) -> set:
         'automation', 'business', 'global', 'international', 'technologies', 'technology',
         'systems', 'solutions', 'services', 'network', 'networks', 'financial', 'capital',
         'federal', 'holdings', 'associates', 'industries', 'partners', 'consulting',
-        'digital', 'analytics', 'data',
+        'digital', 'analytics', 'data', 'security',
 
         # suffix add-ons found in your list
         'labs', 'lab', 'studio', 'brands', 'health', 'care', 'ventures', 'markets', 'exchange',
