@@ -18,6 +18,11 @@ from app.services.llm_service import ask_openai, ask_anthropic
 
 from app.core.config import settings
 from app.utils.prompts import champion_prompt, parr_principle_prompt, buyer_intent_prompt, pricing_concerns_prompt, no_decision_maker_prompt, already_has_vendor_prompt
+
+# Load call pulse prompt from file
+_call_pulse_prompt_path = Path(__file__).parent.parent / "prompts" / "call_pulse_prompt.txt"
+with open(_call_pulse_prompt_path, "r") as f:
+    call_pulse_prompt = f.read()
 from app.utils.general_utils import extract_company_name
 
 import uuid
@@ -847,21 +852,12 @@ class GongService:
                     seller_name="Galileo"
                 )
                 
-                # Get sentiment
+                # Get call pulse (sentiment)
                 sentiment = "-- Not computed --"
                 if transcript:
-                    # Truncate content to a reasonable length before analysis
-                    max_content_length = 10000  # Roughly 2500 tokens
-                    if len(transcript) > max_content_length:
-                        transcript = transcript[:max_content_length] + "..."
-                        
                     sentiment = ask_openai(
-                        system_content="You are a smart Sales Operations Analyst that analyzes Sales emails.",
-                        user_content=f"""
-                        Classify the sentiment in this email as positive (likely to buy Galileo), negative (unlikely to buy Galileo), or neutral (no clear indication to buy Galileo):
-                        {transcript}
-                        Return only one word: positive, negative, neutral
-                        """
+                        system_content="You are a senior Sales Operations Analyst whose job is to capture the true pulse of a sales call.",
+                        user_content=call_pulse_prompt.format(transcript=transcript)
                     )
                 
                 event = {
