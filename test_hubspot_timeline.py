@@ -13,7 +13,7 @@ def test_hubspot_timeline():
     load_dotenv()
     
     # Get API key from environment
-    api_key = "pat-na1-4c2808e2-99e9-4803-960e-36416400ed0e"
+    api_key = os.getenv("HUBSPOT_API_KEY")
     if not api_key:
         print("Error: HUBSPOT_API_KEY not found in .env file")
         return None
