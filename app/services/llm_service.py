@@ -64,7 +64,7 @@ def ask_openai(user_content: str, system_content: str = "You are a smart Sales A
                 return "Error: Content too long even after truncation"
         else:
             print(f"Error in ask_openai: {str(e)}")
-            return "Error: Failed to get response from OpenAI"
+            return f"Error: Failed to get response from OpenAI: {str(e)}"
 
 
 def ask_anthropic(
