@@ -777,20 +777,19 @@ class GongService:
             traceback.print_exc()
             return []
 
-    def get_additional_meetings(self, company_name: str, timeline_events: List[Dict], date_str: str) -> List[Dict]:
+    def get_additional_meetings(self, company_name: str, existing_subjects: List[str], date_str: str) -> List[Dict]:
         try:
             print(f"Getting additional meetings for company {company_name} on date {date_str}.")
-            existing_subjects = {event.get("subject", "").lower() for event in timeline_events}
-            
+            existing_subjects_set = {subject.lower() for subject in existing_subjects}
+
             added_subjects = set()
             additional_meetings = []
-            
+
             # Get calls for this date
             calls = self.list_calls(date_str)
             
             for call in calls:
                 call_title = call.get("title", "").lower()
-                print(f"Call title from Gong: {call_title} on date {date_str}")
                 
                 # Skip if call title is empty
                 if not call_title:
@@ -812,7 +811,8 @@ class GongService:
                     continue
                     
                 # Skip if this meeting already exists in timeline events or has been added
-                if call_title.strip().lower() in {s.strip().lower() for s in existing_subjects} or call_title.strip().lower() in {s.strip().lower() for s in added_subjects}:
+                call_title_normalized = call_title.strip()
+                if call_title_normalized in existing_subjects_set or call_title_normalized in added_subjects:
                     print("Skipping duplicate call title: ", call_title)
                     continue
                 
@@ -875,7 +875,7 @@ class GongService:
                 }
                 
                 # Add to our tracking set and list
-                added_subjects.add(call_title)
+                added_subjects.add(call_title_normalized)
                 additional_meetings.append(event)
             
             return additional_meetings
@@ -886,6 +886,7 @@ class GongService:
             return []
 
     def get_meeting_insights(self, call_id: str) -> Dict:
+        print(f"[Gong] Getting meeting insights for call ID: {call_id}")
         headers = {'Content-Type': 'application/json'}
 
         # Step 1: Get transcript

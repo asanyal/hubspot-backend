@@ -488,7 +488,7 @@ class HubspotService:
                 return {"events": [], "start_date": None, "end_date": None}
             
             # Now fetch activities for this deal
-            print("Getting all engagements from HubSpot for deal: ", deal_name)
+            print("[Hubspot] Getting all engagements for ", deal_name)
             engagement_url = f"https://api.hubapi.com/crm/v3/objects/deals/{deal_id}/associations/engagements"
             engagement_response = self._session.get(engagement_url)
             
@@ -616,8 +616,9 @@ class HubspotService:
                     event_id = f"{eng_id}_{engagement_date.strftime('%Y%m%d%H%M')}"
 
                     buyer_intent = {"intent": "N/A", "explanation": "N/A"}
+
                     if display_type == "Meeting":
-                        print("Getting the intent analysis data for meeting: ", subject)
+                        print("[Gong] Getting buyer intent for meeting: ", subject)
                         result = self.gong_service.get_buyer_intent(
                             call_title=subject.strip(), 
                             call_date=engagement_date.strftime('%Y-%m-%d'),
@@ -632,17 +633,13 @@ class HubspotService:
                                     "explanation": result.get("summary", "N/A")
                                 }
                                 print("Created the Buyer intent dictionary with intent and explanation: ", buyer_intent)
-                                print(f"🔍 DEBUG HUBSPOT: buyer_intent explanation type: {type(buyer_intent['explanation'])}")
-                                if isinstance(buyer_intent['explanation'], dict):
-                                    print(f"🔍 DEBUG HUBSPOT: buyer_intent explanation keys: {list(buyer_intent['explanation'].keys())}")
-                                else:
-                                    print(f"⚠️ WARNING HUBSPOT: buyer_intent explanation is not a dict, it's: {type(buyer_intent['explanation'])}")
                             else:
                                 print(f"Invalid buyer intent data! Doing N/A.")
                                 buyer_intent = {"intent": "N/A", "explanation": "N/A"}
 
                     # Get sentiment for content
                     sentiment = "Unknown"
+
                     if content is not None and content != "":
                         # Truncate content to a reasonable length before analysis
                         max_content_length = 15000
@@ -662,7 +659,7 @@ class HubspotService:
                         content = ask_openai(
                             system_content="You are a smart Sales Operations Analyst that summarizes Sales emails.",
                             user_content=f"""
-                                Shorten the content to 2 lines: {content}
+                                Shorten the content to 2 sentences: {content}
                             """
                         )
 
@@ -682,11 +679,6 @@ class HubspotService:
                         "buyer_intent": buyer_intent["intent"],
                         "buyer_intent_explanation": buyer_intent["explanation"]
                     }
-                    print(f"🔍 DEBUG HUBSPOT EVENT: buyer_intent_explanation type: {type(event['buyer_intent_explanation'])}")
-                    if isinstance(event['buyer_intent_explanation'], dict):
-                        print(f"🔍 DEBUG HUBSPOT EVENT: buyer_intent_explanation keys: {list(event['buyer_intent_explanation'].keys())}")
-                    else:
-                        print(f"⚠️ WARNING HUBSPOT EVENT: buyer_intent_explanation is not a dict, it's: {type(event['buyer_intent_explanation'])}")
 
                     if event.get("type") == "Meeting":
                         for prefix in prefixes:
@@ -732,7 +724,7 @@ class HubspotService:
             # Get additional meetings from Gong
             company_name = extract_company_name(deal_name)
 
-            print("Getting additional meetings from Gong for company: ", company_name)
+            print("[Gong] Getting additional meetings for company: ", company_name)
 
             sd, ed = date_range
 
@@ -741,7 +733,8 @@ class HubspotService:
 
             current = sd
             while current <= ed:
-                gong_meetings = self.gong_service.get_additional_meetings(company_name, timeline_events, current.strftime('%Y-%m-%d'))
+                existing_subjects = [event.get("subject", "") for event in timeline_events]
+                gong_meetings = self.gong_service.get_additional_meetings(company_name, existing_subjects, current.strftime('%Y-%m-%d'))
 
                 if gong_meetings and len(gong_meetings) > 0:
                     for event in gong_meetings:

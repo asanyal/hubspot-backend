@@ -222,11 +222,64 @@ class DataSyncService2:
         all_deals = self.hubspot_service.get_all_deals()
         print(Fore.MAGENTA + f"Found {len(all_deals)} total deals to sync" + Style.RESET_ALL)
 
+
+        #============================================================
+        # Filter the deals that either had Hubspot Activity, or had a Gong Call on the given date
+        #============================================================
+
+        print(Fore.CYAN + f"Pre-filtering deals with activity on {date_str}..." + Style.RESET_ALL)
+
+        print("Step 1: Gong List Calls for date.")
+        gong_calls = self.gong_service.list_calls(date_str)
+        print(Fore.GREEN + f"Found {len(gong_calls)} Gong calls on {date_str}" + Style.RESET_ALL)
+
+        from app.services.gong_service import filter_filler_words
+
+        gong_matched_deals = []
+        for call in gong_calls:
+            call_title = call.get("title", "")
+            if not call_title:
+                continue
+
+            call_company_name = extract_company_name(call_title)
+            if not call_company_name or call_company_name == "Unknown Company":
+                continue
+
+            call_company_words = filter_filler_words(call_company_name.lower())
+
+            for deal in all_deals:
+                deal_name = deal.get("dealname", "")
+                if not deal_name:
+                    continue
+
+                deal_name_words = filter_filler_words(deal_name.lower())
+
+                if call_company_words & deal_name_words:
+                    gong_matched_deals.append({
+                        "call_title": call_title,
+                        "call_company": call_company_name,
+                        "deal_name": deal_name,
+                        "matched_words": call_company_words & deal_name_words
+                    })
+                    break
+
+        if len(gong_matched_deals) == 0:
+            print(Fore.CYAN + "No Gong matches found." + Style.RESET_ALL)
+
+        gong_matched_deal_names = {match['deal_name'] for match in gong_matched_deals}
+        deals_with_any_engagement_on_date = [
+            deal for deal in all_deals if deal.get("dealname") in gong_matched_deal_names
+        ]
+        print(Fore.GREEN + f"Found {len(deals_with_any_engagement_on_date)} deals with any engagement on {date_str}" + Style.RESET_ALL)
+        #============================================================
+
         # Track if any deals had new activity
         any_activity_found = False
         deals_with_activity = []
 
-        for deal in all_deals:
+        print(f"Step 3: Sync {len(deals_with_any_engagement_on_date)} deals.")
+
+        for deal in deals_with_any_engagement_on_date:
             try:
                 deal_name = deal.get("dealname")
                 if not deal_name:
@@ -431,13 +484,13 @@ class DataSyncService2:
         try:
             print(f"Listing all the calls on date {date_str}")
             calls = self.gong_service.list_calls(date_str)
-            print(f"Found {len(calls)} calls on date {date_str}")
+            print(f"[Gong] Found {len(calls)} calls on date {date_str}")
             for call in calls:
                 if "title" in call:
                     print(Fore.GREEN + f"Call: {call['title']}" + Style.RESET_ALL)
             
             company_name = extract_company_name(deal_name)
-            print(f"Extracting call ID for a call with company name: {company_name}")
+            print(f"[Gong] Extracting call ID for a call with company name: {company_name}")
             call_id = self.gong_service.get_call_id(calls, company_name)
             
             if call_id:
@@ -445,7 +498,7 @@ class DataSyncService2:
                 new_concerns = self.gong_service.get_concerns(deal_name, date_str)
                 if not isinstance(new_concerns, dict):
                     new_concerns = str(new_concerns)
-                print(Fore.YELLOW + f"Concerns on date {date_str}: {new_concerns}" + Style.RESET_ALL)
+                print(Fore.YELLOW + f"Concerns for {deal_name} on date {date_str}: {new_concerns}" + Style.RESET_ALL)
                 
                 if isinstance(new_concerns, dict):
                     # Update insights data
@@ -510,22 +563,22 @@ class DataSyncService2:
                             subject = new_event.get("subject").strip().lower()
                             # If an event with this subject exists, remove it first
                             if subject in existing_events_by_subject:
-                                print(f"Removing older event with subject: {subject}")
+                                print(f"[MongoDB] Removing older event with subject: {subject}")
                                 self.deal_timeline_repo.remove_event(deal_name, existing_events_by_subject[subject])
                             # Add the new event
-                            print(Fore.YELLOW + f"Adding new event with subject: {subject}" + Style.RESET_ALL)
+                            print(Fore.YELLOW + f"[MongoDB] Adding new event with subject: {subject}" + Style.RESET_ALL)
                             self.deal_timeline_repo.add_event(deal_name, new_event)
                     return True  # Successfully processed timeline events
                 else:
                     timeline_data["last_updated"] = datetime.now()
                     self.deal_timeline_repo.upsert_timeline(deal_name, timeline_data)
-                    print(Fore.GREEN + f"Successfully created new timeline for deal: {deal_name}" + Style.RESET_ALL)
+                    print(Fore.GREEN + f"[MongoDB] Successfully created new timeline for deal: {deal_name}" + Style.RESET_ALL)
                     return True  # Successfully created new timeline
             else:
                 print("No events to process in timeline data.")
                 return False  # No events found
         except Exception as e:
-            print(Fore.RED + f"Error syncing deal_timeline. Deal: {deal_name}. Error: {str(e)}" + Style.RESET_ALL)
+            print(Fore.RED + f"[MongoDB] Error syncing deal_timeline. Deal: {deal_name}. Error: {str(e)}" + Style.RESET_ALL)
             return False  # Error occurred, no timeline events processed
 
     def _sync_meeting_insights(self, deal_name: str, date_str: str) -> bool:
@@ -545,7 +598,7 @@ class DataSyncService2:
             call_id = self.gong_service.get_call_id(calls, company_name)
             
             if call_id:
-                print(Fore.GREEN + f"Found 1 call match for {company_name} on {date_str}" + Style.RESET_ALL)    
+                print(Fore.GREEN + f"[Gong] Found 1 call match for {company_name} on {date_str}" + Style.RESET_ALL)    
                 insights = self.gong_service.get_meeting_insights(call_id)
 
                 if insights:
@@ -564,7 +617,7 @@ class DataSyncService2:
                     print(Fore.YELLOW + f"No insights returned for call {call_id}" + Style.RESET_ALL)
                     return False  # Call found but no insights
             else:
-                print(Fore.RED + f"No call found for {company_name} on {date_str}" + Style.RESET_ALL)
+                print(Fore.RED + f"[Gong] No call found for {company_name} on {date_str}" + Style.RESET_ALL)
                 return False  # No call found
 
         except Exception as e:
