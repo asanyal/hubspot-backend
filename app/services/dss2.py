@@ -485,10 +485,7 @@ class DataSyncService2:
             print(f"Listing all the calls on date {date_str}")
             calls = self.gong_service.list_calls(date_str)
             print(f"[Gong] Found {len(calls)} calls on date {date_str}")
-            for call in calls:
-                if "title" in call:
-                    print(Fore.GREEN + f"Call: {call['title']}" + Style.RESET_ALL)
-            
+
             company_name = extract_company_name(deal_name)
             print(f"[Gong] Extracting call ID for a call with company name: {company_name}")
             call_id = self.gong_service.get_call_id(calls, company_name)
@@ -590,11 +587,7 @@ class DataSyncService2:
         try:
 
             calls = self.gong_service.list_calls(date_str)
-            print(Fore.BLUE + f"Total calls on {date_str}: {len(calls)}" + Style.RESET_ALL)
-
             company_name = extract_company_name(deal_name)
-            print(f"Company name: {company_name}")
-
             call_id = self.gong_service.get_call_id(calls, company_name)
             
             if call_id:
