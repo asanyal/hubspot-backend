@@ -362,18 +362,27 @@ class HubspotService:
             try:
                 response = self._session.get(deals_url, params=page_params)
                 if response.status_code != 200:
+                    print(f"[Hubspot] Error fetching deals page - Status: {response.status_code}, URL: {response.url}")
                     return []
-                    
+
                 result = response.json()
                 return result.get("results", [])
             except Exception as e:
-                print(f"Error fetching deals page: {str(e)}")
+                print(f"[Hubspot] Exception fetching deals page: {str(e)}")
+                import traceback
+                print(f"[Hubspot] Traceback: {traceback.format_exc()}")
                 return []
         
         # First, get initial page to determine total pages
         response = self._session.get(deals_url, params=params)
         if response.status_code != 200:
-            print(f"Error fetching initial deals page: {response.status_code}")
+            print(f"[Hubspot] Error fetching initial deals page")
+            print(f"[Hubspot] Status Code: {response.status_code}")
+            print(f"[Hubspot] URL: {response.url}")
+            print(f"[Hubspot] Response Headers: {dict(response.headers)}")
+            print(f"[Hubspot] Response Body: {response.text}")
+            if response.status_code == 401:
+                print(f"[Hubspot] Authentication failed - check your API key/access token")
             return []
         
         result = response.json()
