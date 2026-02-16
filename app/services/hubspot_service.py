@@ -514,8 +514,7 @@ class HubspotService:
             filtered_engagement_ids = []
             if date_range:
                 start_date, end_date = date_range
-                print(f"Filtering engagements between {start_date} and {end_date}")
-                
+
                 for eng_id in engagement_ids:
                     try:
                         engagements_url = f"https://api.hubapi.com/crm/v3/objects/engagements/{eng_id}"
@@ -551,7 +550,6 @@ class HubspotService:
             prefixes = ["[Gong] Google Meet:", "[Gong] Zoom:", "[Gong] WebEx:", "[Gong]"]
 
             from colorama import Fore, Style
-            print(Fore.YELLOW + f"Processing {len(engagement_ids)} engagements for deal {deal_name}." + Style.RESET_ALL)
 
             for eng_id in engagement_ids:
                 try:
@@ -603,7 +601,6 @@ class HubspotService:
                         display_type = "Call"
                     elif activity_type == "MEETING":
                         subject = engagement_properties.get('hs_meeting_title', 'Untitled meeting')
-                        print("Meeting. Subject: ", subject)
                         content = engagement_properties.get('hs_meeting_body', '')
                         display_type = "Meeting"
                     elif activity_type == "TASK":
@@ -641,7 +638,6 @@ class HubspotService:
                                     "intent": result.get("intent", "N/A"),
                                     "explanation": result.get("summary", "N/A")
                                 }
-                                print("Created the Buyer intent dictionary with intent and explanation: ", buyer_intent)
                             else:
                                 print(f"Invalid buyer intent data! Doing N/A.")
                                 buyer_intent = {"intent": "N/A", "explanation": "N/A"}
@@ -692,8 +688,7 @@ class HubspotService:
                     if event.get("type") == "Meeting":
                         for prefix in prefixes:
                             event['subject'] = event['subject'].replace(prefix, "").strip()
-                        print("Meeting. Removed prefix from subject: ", event['subject'])
-                        
+
                         subject_key = f"{event['subject'].lower().strip()}_{event['date_str']}"
 
                         if subject_key in seen_subjects:
@@ -736,9 +731,6 @@ class HubspotService:
             print("[Gong] Getting additional meetings for company: ", company_name)
 
             sd, ed = date_range
-
-            print("Date range: ", sd, ed)
-            print(type(sd), type(ed))
 
             current = sd
             while current <= ed:

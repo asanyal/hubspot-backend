@@ -229,7 +229,7 @@ class DataSyncService2:
 
         print(Fore.CYAN + f"Pre-filtering deals with activity on {date_str}..." + Style.RESET_ALL)
 
-        print("Step 1: Gong List Calls for date.")
+        print("[Gong] Listing calls for date.")
         gong_calls = self.gong_service.list_calls(date_str)
         print(Fore.GREEN + f"Found {len(gong_calls)} Gong calls on {date_str}" + Style.RESET_ALL)
 
@@ -270,7 +270,7 @@ class DataSyncService2:
         deals_with_any_engagement_on_date = [
             deal for deal in all_deals if deal.get("dealname") in gong_matched_deal_names
         ]
-        print(Fore.GREEN + f"Found {len(deals_with_any_engagement_on_date)} deals with any engagement on {date_str}" + Style.RESET_ALL)
+        print(Fore.GREEN + f"[Hubspot] Found {len(deals_with_any_engagement_on_date)} deals with any engagement on {date_str}" + Style.RESET_ALL)
         #============================================================
 
         # Track if any deals had new activity
@@ -285,7 +285,6 @@ class DataSyncService2:
                 if not deal_name:
                     continue
 
-                print(Fore.YELLOW + f"Processing deal: {deal_name}" + Style.RESET_ALL)
                 t = time.time()
                 
                 # Sync deal info (always runs, doesn't indicate new activity)
@@ -363,8 +362,6 @@ class DataSyncService2:
 
         # Step 4: Calculate performance for each owner
         for owner, deals in owner_deals_map.items():
-            print(Fore.GREEN + f"Syncing numbers for {owner}" + Style.RESET_ALL)
-
             performance = {
                 "likely to buy": {"count": 0, "deals": {}},
                 "very likely to buy": {"count": 0, "deals": {}},
@@ -427,8 +424,6 @@ class DataSyncService2:
                     "deals": deals_list
                 }
 
-            print(Fore.MAGENTA + f"Performance for {owner}: {formatted_performance}" + Style.RESET_ALL)
-
             print(Fore.RED + f"Deleting owner performance for {owner}" + Style.RESET_ALL)
             self.deal_owner_performance_repo.delete_owner_performance(owner)
             print(Fore.RED + f"Inserting owner performance for {owner}" + Style.RESET_ALL)
@@ -443,7 +438,7 @@ class DataSyncService2:
             # Get deal info from HubSpot
             hubspot_deal = self._get_hubspot_deal_info(deal_name)
             if not hubspot_deal:
-                print(Fore.RED + f"Could not find deal '{deal_name}' in HubSpot" + Style.RESET_ALL)
+                print(Fore.RED + f"[Hubspot] Could not find deal '{deal_name}'" + Style.RESET_ALL)
                 return
 
             company_name = extract_company_name(deal_name)
@@ -482,9 +477,7 @@ class DataSyncService2:
             bool: True if new insights were found and processed, False otherwise
         """
         try:
-            print(f"Listing all the calls on date {date_str}")
             calls = self.gong_service.list_calls(date_str)
-            print(f"[Gong] Found {len(calls)} calls on date {date_str}")
 
             company_name = extract_company_name(deal_name)
             print(f"[Gong] Extracting call ID for a call with company name: {company_name}")
@@ -495,8 +488,7 @@ class DataSyncService2:
                 new_concerns = self.gong_service.get_concerns(deal_name, date_str)
                 if not isinstance(new_concerns, dict):
                     new_concerns = str(new_concerns)
-                print(Fore.YELLOW + f"Concerns for {deal_name} on date {date_str}: {new_concerns}" + Style.RESET_ALL)
-                
+
                 if isinstance(new_concerns, dict):
                     # Update insights data
                     insights_data = {
@@ -534,11 +526,10 @@ class DataSyncService2:
             start_date = datetime.strptime(date_str, '%Y-%m-%d')
             end_date = datetime.strptime(date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
 
-            print(f"Getting timeline data between dates {start_date} and {end_date} (inclusive).")
+            print(f"[Hubspot] Getting timeline data between {start_date} and {end_date} (inclusive).")
             timeline_data = self.hubspot_service.get_deal_timeline(deal_name, date_range=(start_date, end_date))
 
             if not timeline_data:
-                print("No timeline data found.")
                 return False
 
             if "events" not in timeline_data:

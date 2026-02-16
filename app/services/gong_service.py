@@ -302,8 +302,7 @@ class GongService:
             title = gong_call.get("title", "")
             # Filter out filler words from title
             title_words = filter_filler_words(title)
-            print(f"-- Matching call title words: {title_words} with company synonyms: {company_synonyms}")
-            
+
             for synonym in company_synonyms:
                 synonym = synonym.strip()
                 # Filter out filler words from synonym
@@ -443,30 +442,24 @@ class GongService:
     def get_buyer_intent_json(self, call_transcript, seller_name) -> Dict:
         try:
             print("Getting buyer intent.")
-            print("🔍 CALLING LLM for buyer intent analysis...")
             response = ask_anthropic(
                 user_content=buyer_intent_prompt.format(
-                    call_transcript=call_transcript, 
+                    call_transcript=call_transcript,
                     seller_name=seller_name
                 ),
                 system_content="You are a smart Sales Analyst that analyzes Sales calls."
             )
-            print(f"Received response from LLM: {response[:100]}...")
-            
+
             # First, try to parse as JSON (in case LLM returns proper JSON)
             try:
                 intent_json = json.loads(response)
-                print("Successfully parsed as JSON")
                 
                 # Check if the summary is a string that needs to be parsed as markdown
                 if isinstance(intent_json.get("summary"), str) and intent_json["summary"].startswith("##"):
-                    print("JSON summary is markdown string, parsing it into structured format...")
                     structured_summary = parse_markdown_buyer_intent(intent_json["summary"], intent_json.get("intent", "Likely to buy"))
                     intent_json["summary"] = structured_summary["summary"]
-                    print(f"Converted markdown summary to structured format with {len(intent_json['summary'])} sections")
-                    
+
             except json.JSONDecodeError:
-                print("Response is not JSON, attempting to parse as markdown...")
                 
                 # Try to extract intent from the response
                 intent = "Likely to buy"  # Default intent
@@ -479,10 +472,9 @@ class GongService:
                     intent = "Neutral"
                 elif "likely to buy" in response_lower:
                     intent = "Likely to buy"
-                
+
                 # Parse the markdown response into structured format
                 intent_json = parse_markdown_buyer_intent(response, intent)
-                print(f"Parsed markdown into structured format with {len(intent_json.get('summary', {}))} sections")
                     
             # Ensure the response has the expected fields
             if "intent" not in intent_json:
@@ -494,8 +486,7 @@ class GongService:
                 print(f"✅ Successfully structured buyer intent with sections: {list(intent_json['summary'].keys())}")
             else:
                 print(f"⚠️ WARNING: intent_json summary is type {type(intent_json.get('summary'))}, not dict!")
-            
-            print("🎯 Returning intent_json successfully!")
+
             return intent_json
         except Exception as e:
             return {
@@ -936,7 +927,6 @@ class GongService:
             calls_data = extensive_response.json().get("calls", [])
             for call_data in calls_data:
                 for party in call_data.get("parties", []):
-                    print(f"Party: {party}")
                     email_address = party.get("emailAddress", "")
                     name = party.get("name", "Unknown name")
                     title = party.get("title", "Unknown title")
@@ -954,8 +944,6 @@ class GongService:
                                 "name": name,
                                 "title": title
                             })
-
-        print(Fore.BLUE + f"Buyer attendees: {buyer_attendees}" + Style.RESET_ALL)
 
         # Step 5: Run intent detection
         buyer_intent = self.get_buyer_intent_json(
