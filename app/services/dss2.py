@@ -303,7 +303,7 @@ class DataSyncService2:
                     deals_with_activity.append(deal_name)
                     print(Fore.GREEN + f"✓ Found new activity for deal: {deal_name}" + Style.RESET_ALL)
                 else:
-                    print(Fore.GRAY + f"- No new activity for deal: {deal_name}" + Style.RESET_ALL)
+                    print(Fore.LIGHTBLACK_EX + f"- No new activity for deal: {deal_name}" + Style.RESET_ALL)
                 
                 elapsed = time.time() - t
                 print(Fore.GREEN + f"Done syncing deal {deal_name} for date {date_str}.\nTook {elapsed:.2f} seconds" + Style.RESET_ALL)
