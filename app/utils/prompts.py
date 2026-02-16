@@ -181,58 +181,66 @@ parr_principle_prompt = """
 
 buyer_intent_prompt = """
 Analyze the following sales call transcript between the Galileo team and a potential buyer.
-Your task is to evaluate the buyer's intent, based only on explicit, action-oriented verbal evidence in the transcript. Ignore tone, politeness, or general enthusiasm.
+Your task is to evaluate how the call went from Galileo's perspective - whether it was POSITIVE, NEGATIVE, or NEUTRAL.
+
+First, determine the call type:
+- Discovery Call (Phase 1): Pre-customer conversations, initial exploration, problem discovery
+- Non-Discovery Call (Phase 2): Post-customer conversations, existing customer engagement, implementation discussions
+
+---
+
+FOR DISCOVERY CALLS (Phase 1 - Pre-Customer):
+
+POSITIVE signals:
+1. Customer explicitly resonates with the problem or acknowledges it as a pain point
+2. Shows clear interest in follow-up conversations with Galileo
+3. Demonstrates no hesitation or resistance
+4. Wants a follow-up demo or requests more information
+5. Shows urgency or priority around the problem Galileo solves
+6. Expresses positive sentiment about Galileo's approach or value proposition
+
+NEGATIVE signals:
+1. Explicitly lukewarm or non-committal response ("that's interesting, but...")
+2. Mentions lack of priority for what Galileo offers
+3. Unsure of next steps (e.g., "let me get back to you after chatting internally")
+4. No decision-maker or buyer in the room (e.g., "I'll talk to my manager to see if there is any interest")
+5. Signals that this isn't a current priority
+6. Shows skepticism or disinterest in the problem Galileo solves
+
+NEUTRAL: None of the above positive or negative signals are clearly present
+
+---
+
+FOR NON-DISCOVERY CALLS (Phase 2 - Post-Customer):
+
+POSITIVE signals:
+1. Things progressing smoothly with no hiccups or blockers
+2. Customers expressing excitement or enthusiasm about Galileo
+3. Positive feedback about the product or results
+4. Clear forward momentum on implementation or usage
+5. Stakeholders engaged and aligned
+6. Problem-solving discussions that move things forward
+
+NEGATIVE signals:
+1. Facing difficulties making progress - stuck on technical issues
+2. Deal stuck in procurement or legal processes
+3. Buyer signals a situation beyond their control blocking progress
+4. Attendees complaining about the product (bugs, integration issues, lack of features)
+5. Frustration with Galileo's product or service
+6. Blocked or stalled progress with no clear path forward
+
+NEUTRAL: None of the above positive or negative signals are clearly present
+
+---
+
 Additionally, identify and summarize any buyer use cases, pain points, or goals related to why they are exploring a Generative AI Evaluation/Observability solution like Galileo. This includes what they are trying to build, measure, improve, or solve — especially related to agent workflows, RAG pipelines, LLM quality, or internal AI initiatives.
-
-Important: Do NOT infer intent from positive sentiment.
-Only consider specific behaviors like pricing discussions, implementation interest, urgency, technical blockers, or organizational alignment.
-
-Specific signals of POSITIVE intent -Strong Buying Intent ("Likely to Buy")
-
-1. Asking for pricing, pilot/POV/trial/POC, or implementation steps
-2. Signals of being impressed by Galileo's value (praise, excitement, etc.)
-3. Stating clear problems Galileo could help solve
-4. Showing signals of excitement
-4. Praising Galileo
-5. Interest in doing a Pilot or a proof of concept
-6. Asking about budgets and costs
-7. Interest in deployment or using Galileo
-
-Specific signals of NEGATIVE intent - Disinterest or Blockers ("Less Likely to Buy")
-
-Negative Intent Signals (Less Likely to Buy)
-	1.	Unclear Value - Confusion or skepticism about Galileo's value, need for more proof.
-	2.	Technical/Results Issues - Product bugs, poor results, integration/deployment blockers.
-	3.	Delays & Deferrals - Postponing decisions, “will revisit later,” no commitment on timeline.
-	4.	Constraints - Budget, resources, or competing priorities blocking progress.
-	5.	Internal Hurdles - Approvals, alignment issues, stakeholder unavailability, procurement complexity.
-	6.	Exploring Alternatives - Evaluating competitors, in-house builds, running bake-offs.
-
-Specific signals of NEUTRAL Intent
-
-1. General information gathering without clear direction
-2. Early-stage exploration with no immediate timeline (tire-kicking)
-3. Mixed signals
-    - not committing to a timeline or implementation
-    - talking about competitors or bake-offs
-    - talking about other vendors
-    - talking about building in-house solutions
-    - talking about different vendors
-    - talking about different approaches
-3. Educational discussions without commitment indicators
-4. No clear direction or purpose
-5. No clear timeline or implementation
-6. No clear budget or resources
-7. No clear stakeholders or decision makers
-8. No clear requirements or specifications
 
 Return a valid JSON object with:
 
 "intent": One of:
-
-"Likely to buy"
-"Neutral"
-"Less likely to buy"
+- "Likely to buy" (call went well for Galileo - POSITIVE)
+- "Neutral" (neither clearly positive nor negative)
+- "Less likely to buy" (call went poorly for Galileo - NEGATIVE)
 
 "summary": A sectioned, markdown-style breakdown using dynamic headers that reflect themes from the transcript.
 

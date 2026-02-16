@@ -65,27 +65,21 @@ def parse_markdown_buyer_intent(markdown_text: str, intent: str = "Likely to buy
             lines = markdown_text.replace('\\n', '\n').split('\n')
         else:
             lines = markdown_text.split('\n')
-        
-        print(f"DEBUG: Parsing markdown with {len(lines)} lines")
-        
+
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-            
-            print(f"DEBUG: Processing line: '{line[:50]}...'") if len(line) > 50 else print(f"DEBUG: Processing line: '{line}'")
-                
+
             # Check if this is a section header (starts with ##)
             if line.startswith('## '):
                 # Save previous section if it exists
                 if current_section and current_bullets:
-                    print(f"DEBUG: Saving section '{current_section}' with {len(current_bullets)} bullets")
                     sections[current_section] = current_bullets
-                
+
                 # Start new section
                 current_section = line[3:].strip()  # Remove "## "
                 current_bullets = []
-                print(f"DEBUG: Starting new section: '{current_section}'")
                 
             # Check if this is a bullet point (starts with - or •)
             elif (line.startswith('- ') or line.startswith('• ')) and current_section:
@@ -97,17 +91,10 @@ def parse_markdown_buyer_intent(markdown_text: str, intent: str = "Likely to buy
                     
                 if bullet_text:
                     current_bullets.append(bullet_text)
-                    print(f"DEBUG: Added bullet to '{current_section}': '{bullet_text[:50]}...'") if len(bullet_text) > 50 else print(f"DEBUG: Added bullet to '{current_section}': '{bullet_text}'")
         
         # Don't forget the last section
         if current_section and current_bullets:
-            print(f"DEBUG: Saving final section '{current_section}' with {len(current_bullets)} bullets")
             sections[current_section] = current_bullets
-        elif current_section:
-            print(f"DEBUG: Section '{current_section}' has no bullets, not saving")
-            
-        print(f"DEBUG: Final sections created: {list(sections.keys())}")
-        print(f"DEBUG: Total sections: {len(sections)}")
         
         return {
             "intent": intent,

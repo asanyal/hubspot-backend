@@ -74,7 +74,6 @@ def ask_anthropic(
     model="claude-opus-4-1-20250805"
 ):
     try:
-        print(f"##### ask_anthropic called with model: {model} #####")
         client = Anthropic(api_key=api_key)
         response = client.messages.create(
             model=model,
@@ -87,9 +86,7 @@ def ask_anthropic(
         )
         output = response.content[0].text.replace("```markdown", "").replace("```code", "").replace("```html", "").replace("```", "").replace('\n', ' ').replace("```json", "").replace("json", "")
 
-        print(f"##### Anthropic output #####")
         print(output)
-        print(f"##### Anthropic output #####")
         return output.strip()
     except Exception as e:
         print(f"Error in ask_anthropic: {str(e)}")
