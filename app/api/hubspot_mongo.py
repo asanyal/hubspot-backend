@@ -756,54 +756,58 @@ async def get_signals(deal_name: Optional[str] = Query(None, description="The na
 @router.post("/get-signals-group")
 async def get_signals_group(deal_names: DealNamesRequest):
     """Get buyer intent signals from meeting events for multiple deals"""
-    
+
     try:
+        # Batch fetch all timelines in a single MongoDB query
+        timelines_cursor = deal_timeline_repo.collection.find(
+            {"deal_id": {"$in": deal_names.deal_names}},
+            {"deal_id": 1, "events.event_type": 1, "events.buyer_intent": 1,
+             "events.buyer_intent_explanation": 1, "events.subject": 1, "events.event_date": 1}
+        )
+        timelines_by_deal = {t["deal_id"]: t for t in timelines_cursor}
+
+        intent_key_map = {
+            "Very likely to buy": "very_likely_to_buy",
+            "Likely to buy": "likely_to_buy",
+            "Less likely to buy": "less_likely_to_buy",
+        }
+
+        empty_result = {"very_likely_to_buy": 0, "likely_to_buy": 0, "less_likely_to_buy": 0, "meetings": []}
         results = {}
-        
+
         for deal_name in deal_names.deal_names:
-            
-            # Get timeline data for the deal
-            timeline_data = deal_timeline_repo.get_by_deal_id(deal_name)
-            
+            timeline_data = timelines_by_deal.get(deal_name)
+
             if not timeline_data:
-                results[deal_name] = {
-                    "very_likely_to_buy": 0,
-                    "likely_to_buy": 0,
-                    "less_likely_to_buy": 0
-                }
+                results[deal_name] = empty_result.copy()
                 continue
-            
-            # Initialize signal counters
-            very_likely_to_buy = 0
-            likely_to_buy = 0
-            less_likely_to_buy = 0
-            
-            # Loop through events and count meeting signals
-            events = timeline_data.get('events', [])
-            
-            for event in events:
-                event_type = event.get('event_type', '')
-                buyer_intent = event.get('buyer_intent', '')
-                
-                if event_type == 'Meeting':
-                    # Map buyer_intent values to signal keys
-                    if buyer_intent == 'Very likely to buy':
-                        very_likely_to_buy += 1
-                    elif buyer_intent == 'Likely to buy':
-                        likely_to_buy += 1
-                    elif buyer_intent == 'Less likely to buy':
-                        less_likely_to_buy += 1
-            
-            result = {
-                "very_likely_to_buy": very_likely_to_buy,
-                "likely_to_buy": likely_to_buy,
-                "less_likely_to_buy": less_likely_to_buy
-            }
-            
-            results[deal_name] = result
-        
+
+            counts = {"very_likely_to_buy": 0, "likely_to_buy": 0, "less_likely_to_buy": 0}
+            meetings = []
+
+            for event in timeline_data.get("events", []):
+                if event.get("event_type") != "Meeting":
+                    continue
+
+                buyer_intent = event.get("buyer_intent", "")
+                key = intent_key_map.get(buyer_intent)
+                if key:
+                    counts[key] += 1
+
+                meetings.append({
+                    "subject": event.get("subject", ""),
+                    "date": event.get("event_date"),
+                    "buyer_intent": buyer_intent,
+                    "buyer_intent_explanation": event.get("buyer_intent_explanation", "N/A"),
+                })
+
+            # Sort meetings most recent first
+            meetings.sort(key=lambda m: m["date"] or "", reverse=True)
+
+            results[deal_name] = {**counts, "meetings": meetings}
+
         return results
-        
+
     except Exception as e:
         import traceback
         traceback.print_exc()
