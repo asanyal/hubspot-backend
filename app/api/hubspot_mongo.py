@@ -10,6 +10,7 @@ from app.repositories.deal_timeline_repository import DealTimelineRepository
 from app.repositories.meeting_insights_repository import MeetingInsightsRepository
 from app.repositories.company_overview_repository import CompanyOverviewRepository
 from app.services.data_sync_service import DataSyncService
+from app.services.hubspot_service import HubspotService
 from app.services.dss2 import DataSyncService2
 from app.repositories.deal_owner_performance_repository import DealOwnerPerformanceRepository
 from colorama import Fore, Style, init
@@ -311,6 +312,49 @@ async def get_all_deals():
         return deal_list
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching deals: {str(e)}")
+
+@router.get("/all-deals-hubspot")
+async def get_all_deals_hubspot():
+    """Temporary endpoint: fetch all deals directly from HubSpot API to inspect raw structure"""
+    try:
+        service = HubspotService()
+        deals_url = "https://api.hubapi.com/crm/v3/objects/deals"
+        params = {"limit": 100, "properties": "dealname,dealstage"}
+
+        service._initialize_stage_mapping()
+        stage_mapping = service._stage_mapping or {}
+
+        all_deals = []
+        while True:
+            response = service._session.get(deals_url, params=params)
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+
+            data = response.json()
+            all_deals.extend(data.get("results", []))
+
+            paging = data.get("paging", {})
+            next_page = paging.get("next", {})
+            if "after" in next_page:
+                params["after"] = next_page["after"]
+            else:
+                break
+
+        deals = []
+        for deal in all_deals:
+            props = deal.get("properties", {})
+            stage_id = props.get("dealstage", "")
+            stage_info = stage_mapping.get(stage_id, {})
+            stage_name = stage_info.get("label", "Unknown") if isinstance(stage_info, dict) else stage_info
+            deals.append({
+                "name": props.get("dealname", ""),
+                "stage": stage_name
+            })
+        return {"total": len(deals), "deals": deals}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching deals from HubSpot: {str(e)}")
 
 @router.get("/deal-timeline", response_model=Dict[str, Any])
 async def get_deal_timeline(
@@ -2216,6 +2260,65 @@ def run_sync_all_stages_on_date(job_id: str, date_str: str):
         if job_id in active_threads:
             del active_threads[job_id] 
 
+@router.post("/sync-deals-to-hubspot")
+async def sync_deals_to_hubspot_endpoint():
+    """Sync MongoDB deal_info collection to HubSpot's latest state by removing stale deals"""
+    try:
+        result = sync_deals_to_hubspot()
+        return {"status": "success", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error syncing deals: {str(e)}")
+
+def sync_deals_to_hubspot():
+    """Sync MongoDB deal_info with HubSpot: remove stale deals and update stages"""
+    service = HubspotService()
+    deals_url = "https://api.hubapi.com/crm/v3/objects/deals"
+    params = {"limit": 100, "properties": "dealname,dealstage"}
+
+    service._initialize_stage_mapping()
+    stage_mapping = service._stage_mapping or {}
+
+    # Fetch all deals from HubSpot with name -> stage mapping
+    hubspot_deals = {}
+    while True:
+        response = service._session.get(deals_url, params=params)
+        if response.status_code != 200:
+            raise Exception(f"Failed to fetch deals from HubSpot: {response.status_code} {response.text}")
+        data = response.json()
+        for deal in data.get("results", []):
+            props = deal.get("properties", {})
+            name = props.get("dealname", "")
+            if name:
+                stage_id = props.get("dealstage", "")
+                stage_info = stage_mapping.get(stage_id, {})
+                stage_name = stage_info.get("label", "Unknown") if isinstance(stage_info, dict) else stage_info
+                hubspot_deals[name] = stage_name
+        paging = data.get("paging", {}).get("next", {})
+        if "after" in paging:
+            params["after"] = paging["after"]
+        else:
+            break
+
+    # Compare with MongoDB: delete stale deals, update stages for existing ones
+    mongo_deals = deal_info_repo.get_all_deals()
+    deleted_count = 0
+    updated_count = 0
+    for deal in mongo_deals:
+        deal_name = deal.get("deal_name", "")
+        if not deal_name:
+            continue
+        if deal_name not in hubspot_deals:
+            deal_info_repo.delete_one({"deal_name": deal_name})
+            deleted_count += 1
+        else:
+            hubspot_stage = hubspot_deals[deal_name]
+            if deal.get("stage") != hubspot_stage:
+                deal_info_repo.update_one({"deal_name": deal_name}, {"$set": {"stage": hubspot_stage}})
+                updated_count += 1
+
+    print(Fore.YELLOW + f"[sync_deals_to_hubspot] Removed {deleted_count} stale deals, updated {updated_count} stages" + Style.RESET_ALL)
+    return {"deleted_count": deleted_count, "updated_count": updated_count}
+
 @router.post("/sync/all-stages/yesterday", status_code=202)
 async def sync_all_stages_yesterday(background_tasks: BackgroundTasks):
     """Sync all deals across all stages for yesterday's date"""
@@ -2223,6 +2326,9 @@ async def sync_all_stages_yesterday(background_tasks: BackgroundTasks):
         # Calculate yesterday's date
         yesterday = datetime.now() - timedelta(days=1)
         date_str = yesterday.strftime("%Y-%m-%d")
+
+        # Sync MongoDB deal_info to HubSpot's latest state before starting
+        sync_deals_to_hubspot()
 
         # Generate a unique job ID
         job_id = f"sync_all_stages_yesterday_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{threading.get_ident()}"
